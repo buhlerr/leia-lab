@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: leia-lab-postgres
+    environment:
+      POSTGRES_USER: leia
+      POSTGRES_PASSWORD: leia_lab_2026
+      POSTGRES_DB: leia_lab
+    ports:
+      - "5433:5432"
+    volumes:
+      - leia_lab_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U leia -d leia_lab"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  leia_lab_pgdata:
