@@ -7,7 +7,6 @@ nunca apague o corpus que voce indexou a mao. Cada teste comeca com o schema
 
 from __future__ import annotations
 
-import os
 from urllib.parse import urlsplit, urlunsplit
 
 import asyncpg
@@ -15,10 +14,8 @@ import pytest
 
 from src.config import Settings
 
-TEST_DATABASE_URL = os.environ.get(
-    "TEST_DATABASE_URL",
-    "postgresql://leia:leia_lab_2026@localhost:5433/leia_lab_test",
-)
+# Mesma precedencia do resto do app: variavel de ambiente > .env > default.
+TEST_DATABASE_URL = Settings().TEST_DATABASE_URL
 
 
 def _server_url(dsn: str, database: str) -> str:

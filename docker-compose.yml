@@ -2,14 +2,19 @@ services:
   postgres:
     image: pgvector/pgvector:pg17
     container_name: leia-lab-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: leia
-      POSTGRES_PASSWORD: leia_lab_2026
+      # Sem default de proposito: a senha vive so no .env (gitignored).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
       POSTGRES_DB: leia_lab
     ports:
-      - "5433:5432"
+      # 5433 no PC (a 5432/5433 podem estar ocupadas); 5432 no homelab.
+      - "${POSTGRES_PORT:-5433}:5432"
     volumes:
       - leia_lab_pgdata:/var/lib/postgresql/data
+    # O CT do homelab tem 2G de RAM compartilhados com outros servicos.
+    mem_limit: 512m
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U leia -d leia_lab"]
       interval: 5s
