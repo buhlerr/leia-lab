@@ -9,8 +9,9 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
       POSTGRES_DB: leia_lab
     ports:
+      # Por padrao so a propria maquina acessa. No homelab, POSTGRES_BIND e o IP da LAN.
       # 5433 no PC (a 5432/5433 podem estar ocupadas); 5432 no homelab.
-      - "${POSTGRES_PORT:-5433}:5432"
+      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5433}:5432"
     volumes:
       - leia_lab_pgdata:/var/lib/postgresql/data
     # O CT do homelab tem 2G de RAM compartilhados com outros servicos.
