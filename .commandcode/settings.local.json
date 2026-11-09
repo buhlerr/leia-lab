@@ -1,0 +1,27 @@
+{
+  "disabledSkills": [
+    "academic-cv-builder",
+    "application-form-filler",
+    "arcane-cli",
+    "arcane-expert",
+    "career-changer-translator",
+    "cold-email-writer",
+    "cover-letter-generator",
+    "creative-portfolio-resume",
+    "executive-resume-writer",
+    "interview-prep-generator",
+    "job-description-analyzer",
+    "linkedin-profile-optimizer",
+    "maestri",
+    "openwrt-homelab-arch",
+    "openwrt-ops",
+    "pangolin-expert",
+    "portfolio-case-study-writer",
+    "pptx",
+    "proxmox-expert",
+    "proxmox-mcp-tools",
+    "resume-ats-optimizer",
+    "resume-bullet-writer",
+    "tech-resume-optimizer"
+  ]
+}

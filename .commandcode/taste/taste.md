@@ -1,0 +1,1 @@
+- Prefers locally generated bootstrap files (e.g., `CLAUDE.md`) to be ignored via `.git/info/exclude` rather than committed, keeping `git status` clean. Confidence: 0.85
