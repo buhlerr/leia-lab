@@ -78,7 +78,7 @@ Correcao do stdin (`_ssh` usa `DEVNULL` quando nao ha entrada) + 2 testes, commi
 ## Como retomar
 
 ```bash
-uv run pytest                          # 84 testes
+uv run pytest                          # 88 testes
 uv sync && uv run streamlit run src/ui/app.py
 ```
 

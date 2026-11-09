@@ -98,12 +98,16 @@ class TestSafeMarkdown:
             "veja https://exemplo.test/x?d=segredo agora",
             "veja HTTP://exemplo.test/x agora",
             "veja www.exemplo.test/x?d=segredo agora",
+            r"\<mailto:a@exemplo.test>",
+            "veja _https://exemplo.test/x?d=segredo agora",
+            "veja 1https://exemplo.test/x?d=segredo agora",
+            "veja _www.exemplo.test/x?d=segredo agora",
         ],
     )
     def test_autolinks_are_defanged(self, text):
         # O CommonMark nao liga URL solta; o GFM da tela liga, entao o texto nao pode casar.
         self._assert_inert(text)
-        assert not re.search(r"(?i)\b(https?://|www\.)", safe_markdown(text))
+        assert not re.search(r"(?i)(https?://|www\.)", safe_markdown(text))
 
     @staticmethod
     def _assert_inert(text):
