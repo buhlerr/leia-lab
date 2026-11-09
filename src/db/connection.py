@@ -19,6 +19,7 @@ POOL_MIN_SIZE = 2
 POOL_MAX_SIZE = 10
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
+CONFIG_SCHEMA_PATH = Path(__file__).with_name("schema_config.sql")
 
 _pool: asyncpg.Pool | None = None
 
@@ -56,7 +57,13 @@ def read_schema_sql() -> str:
     return SCHEMA_PATH.read_text(encoding="utf-8")
 
 
+def read_config_schema_sql() -> str:
+    """Read the config DDL script bundled with this package."""
+    return CONFIG_SCHEMA_PATH.read_text(encoding="utf-8")
+
+
 async def init_db(pool: asyncpg.Pool) -> None:
-    """Apply ``schema.sql`` (idempotent DDL) to the database behind ``pool``."""
+    """Apply ``schema.sql`` then ``schema_config.sql`` (idempotent DDL) to the database behind ``pool``."""
     await pool.execute(read_schema_sql())
-    logger.info("Database schema applied from %s", SCHEMA_PATH)
+    await pool.execute(read_config_schema_sql())
+    logger.info("Database schema applied from %s and %s", SCHEMA_PATH, CONFIG_SCHEMA_PATH)

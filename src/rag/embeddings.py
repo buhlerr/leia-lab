@@ -13,7 +13,7 @@ import logging
 
 import httpx
 
-from src.config import Settings
+from src.config import Settings, ZERO_RETENTION_PROVIDER
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +66,8 @@ async def get_embedding(text: str, settings: Settings | None = None) -> list[flo
         "input": text,
         "dimensions": EMBEDDING_DIM,
     }
+    if settings.EMBEDDING_ZERO_RETENTION:
+        payload["provider"] = ZERO_RETENTION_PROVIDER
     headers = {"Authorization": f"Bearer {settings.OPENROUTER_API_KEY}"}
 
     async with httpx.AsyncClient(timeout=httpx.Timeout(EMBEDDING_TIMEOUT_SECONDS)) as client:

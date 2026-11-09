@@ -49,4 +49,4 @@ async def pool():
 @pytest.fixture
 def settings() -> Settings:
     """Settings apontando para o banco de teste, sem chave de API (modo offline)."""
-    return Settings(DATABASE_URL=TEST_DATABASE_URL, OPENROUTER_API_KEY="")
+    return Settings(DATABASE_URL=TEST_DATABASE_URL, OPENROUTER_API_KEY="", DEEPSEEK_API_KEY="")
