@@ -24,7 +24,8 @@ from src.agent.pipeline import (
 from src.config import Settings
 from src.db.config_repo import list_minuta_types
 from src.db.connection import init_db
-from src.ingest.extract import DocumentError, extract_text
+from src.ingest.extract import DocumentError
+from src.ingest.isolated import extract_text_isolated
 from src.ui.render import render_safe_html
 
 
@@ -198,7 +199,7 @@ def main() -> None:
 
         with st.spinner("Analisando a minuta..."):
             try:
-                text = extract_text(uploaded_file.name, uploaded_file.getvalue())
+                text = extract_text_isolated(uploaded_file.name, uploaded_file.getvalue())
                 result = asyncio.run(
                     _with_pool(
                         settings,

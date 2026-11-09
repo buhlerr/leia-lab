@@ -15,6 +15,7 @@ import zipfile
 import docx
 import pypdf
 from docx.text.paragraph import Paragraph
+from pypdf import apply_configuration
 
 # Os limites valem antes de qualquer biblioteca abrir o arquivo: um zip pequeno
 # pode inflar para gigabytes e esgotar a memoria da maquina.
@@ -22,6 +23,9 @@ MAX_UPLOAD_BYTES = 32 * 1024 * 1024
 MAX_DOCX_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
 # Mesmo teto do pipeline: nao adianta extrair texto que seria recusado depois.
 MAX_TEXT_CHARS = 200_000
+# Limitam a memoria de um PDF com muitas streams infladas.
+MAX_PDF_PAGES = 500
+MAX_PDF_STREAM_BYTES = 8_000_000
 
 
 class DocumentError(ValueError):
@@ -46,18 +50,23 @@ class DocumentTooLargeError(DocumentError):
 
 def _extract_pdf(data: bytes) -> str:
     """Return the text of every PDF page, joining pages with a blank line."""
-    reader = pypdf.PdfReader(io.BytesIO(data))
-    pages: list[str] = []
-    total = 0
-    for page in reader.pages:
-        extracted = page.extract_text() or ""
-        total += len(extracted)
-        if total > MAX_TEXT_CHARS:
+    with apply_configuration(zlib_maximum_output_length=MAX_PDF_STREAM_BYTES):
+        reader = pypdf.PdfReader(io.BytesIO(data))
+        if len(reader.pages) > MAX_PDF_PAGES:
             raise DocumentTooLargeError(
-                f"The document has more than {MAX_TEXT_CHARS} characters of text"
+                f"The document has more than {MAX_PDF_PAGES} pages"
             )
-        pages.append(extracted)
-    return "\n\n".join(pages)
+        pages: list[str] = []
+        total = 0
+        for page in reader.pages:
+            extracted = page.extract_text() or ""
+            total += len(extracted)
+            if total > MAX_TEXT_CHARS:
+                raise DocumentTooLargeError(
+                    f"The document has more than {MAX_TEXT_CHARS} characters of text"
+                )
+            pages.append(extracted)
+        return "\n\n".join(pages)
 
 
 def _check_docx_uncompressed(data: bytes) -> None:

@@ -122,3 +122,15 @@ def test_extract_stops_pdf_reading_when_text_passes_the_limit(
 
     with pytest.raises(DocumentTooLargeError):
         extract_text("minuta.pdf", _pdf_with_text("Contrato de teste"))
+
+
+def test_extract_rejects_pdf_above_the_page_limit(monkeypatch: pytest.MonkeyPatch):
+    writer = pypdf.PdfWriter()
+    for _ in range(3):
+        writer.add_blank_page(width=200, height=200)
+    buffer = io.BytesIO()
+    writer.write(buffer)
+    monkeypatch.setattr("src.ingest.extract.MAX_PDF_PAGES", 2)
+
+    with pytest.raises(DocumentTooLargeError):
+        extract_text("minuta.pdf", buffer.getvalue())
