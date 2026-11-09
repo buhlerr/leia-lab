@@ -8,7 +8,7 @@ from typing import Literal
 import httpx
 from pydantic_ai import Agent
 
-from src.agent.llm import build_model, minuta_system_prompt
+from src.agent.llm import build_model, minuta_history
 from src.config import Settings
 from src.db.config_repo import MinutaType
 
@@ -40,12 +40,13 @@ async def classify_minuta(
     agent = Agent(
         build_model(settings, http_client=http_client),
         output_type=output,
-        system_prompt=minuta_system_prompt(text[:CLASSIFIER_EXCERPT_CHARS]),
-        instructions=CLASSIFIER_INSTRUCTIONS,
     )
 
     try:
-        result = await agent.run("Classifique o documento.")
+        result = await agent.run(
+            CLASSIFIER_INSTRUCTIONS,
+            message_history=minuta_history(text[:CLASSIFIER_EXCERPT_CHARS]),
+        )
     except Exception as exc:
         # Nunca registre o texto da minuta: ele e confidencial.
         logger.warning("Falha ao classificar minuta: %s", type(exc).__name__)

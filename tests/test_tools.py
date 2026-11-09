@@ -8,7 +8,7 @@ import pytest
 from pydantic_ai import Agent, ModelRetry
 from pydantic_ai.models.test import TestModel
 
-from src.agent.tools import AnalysisDeps, search_kb
+from src.agent.tools import MAX_QUERY_CHARS, AnalysisDeps, search_kb
 from src.db.connection import init_db
 
 
@@ -46,3 +46,25 @@ async def test_search_kb_rejects_blank_query(pool, settings):
 
     with pytest.raises(ModelRetry):
         await search_kb(ctx, "   ")
+
+
+async def test_search_kb_rejects_query_above_the_limit(pool, settings):
+    ctx = SimpleNamespace(deps=AnalysisDeps(pool, settings))
+
+    with pytest.raises(ModelRetry):
+        await search_kb(ctx, "x" * (MAX_QUERY_CHARS + 1))
+
+
+async def test_search_kb_returns_content_as_material_block(pool, settings):
+    await init_db(pool)
+    await _insert_chunk(
+        pool,
+        "Contrato de servicos",
+        "Clausula de rescisao com aviso previo de 30 dias.",
+    )
+    ctx = SimpleNamespace(deps=AnalysisDeps(pool, settings))
+
+    results = await search_kb(ctx, "rescisao")
+
+    assert results[0]["content"].startswith("<material>")
+    assert results[0]["content"].endswith("</material>")

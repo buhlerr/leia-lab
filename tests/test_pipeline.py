@@ -210,8 +210,16 @@ async def test_reports_share_the_cacheable_prefix(pool, settings):
         result = await run_analysis(pool, "MINUTA COMPLETA", online, type_id, http_client=client)
 
     assert [item.status for item in result.reports] == ["ok", "ok"]
-    assert bodies[0]["messages"][0] == bodies[1]["messages"][0]
-    assert "MINUTA COMPLETA" in bodies[0]["messages"][0]["content"]
+    tamanho = 3
+    assert bodies[0]["messages"][:tamanho] == bodies[1]["messages"][:tamanho]
+    assert not any(
+        message["role"] == "system" and "MINUTA COMPLETA" in (message.get("content") or "")
+        for message in bodies[0]["messages"]
+    )
+    assert any(
+        message["role"] == "user" and "MINUTA COMPLETA" in (message.get("content") or "")
+        for message in bodies[0]["messages"]
+    )
     assert bodies[0]["tools"] == bodies[1]["tools"]
     assert result.reports[0].cache_read_tokens == 90
 
@@ -220,7 +228,7 @@ async def test_classifier_reads_only_the_start_of_the_document(settings, monkeyp
     seen: list[str] = []
 
     def fn(messages, info: AgentInfo) -> ModelResponse:
-        seen.append(str(messages[0].parts[0].content))
+        seen.append(str(messages[0].parts[1].content))
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, {"response": "compra"})])
 
     monkeypatch.setattr("src.agent.classifier.build_model", lambda *a, **k: FunctionModel(fn))
@@ -246,7 +254,7 @@ async def test_update_on_prompt_applies_to_next_run(pool, settings, monkeypatch)
     )
 
     def fn(messages, info: AgentInfo) -> ModelResponse:
-        return ModelResponse(parts=[TextPart(info.instructions or "")])
+        return ModelResponse(parts=[TextPart(str(messages[-1].parts[-1].content))])
 
     monkeypatch.setattr(
         "src.agent.pipeline.build_model",

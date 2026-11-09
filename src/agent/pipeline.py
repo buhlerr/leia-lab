@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 
 import asyncpg
@@ -10,7 +11,7 @@ from pydantic_ai import Agent, PromptedOutput
 from pydantic_ai.usage import RunUsage
 
 from src.agent.classifier import classify_minuta
-from src.agent.llm import build_model, minuta_system_prompt
+from src.agent.llm import build_model, minuta_history
 from src.agent.outputs import AnalysisResult, ChecklistItem, ChecklistOutput, ReportResult
 from src.agent.tools import AnalysisDeps, search_kb
 from src.config import Settings
@@ -25,7 +26,10 @@ logger = logging.getLogger(__name__)
 
 MAX_MINUTA_CHARS = 200_000
 ERROR_TEXT_LIMIT = 300
-REPORT_REQUEST = "Execute o relatorio pedido nas instrucoes."
+CHECKLIST_FORMAT = (
+    "Responda somente com um objeto JSON valido neste formato (JSON Schema): "
+    + json.dumps(ChecklistOutput.model_json_schema(), ensure_ascii=False)
+)
 # TestModel nao gera saida em JSON sozinho; o modo offline precisa de uma pronta.
 OFFLINE_CHECKLIST_JSON = ChecklistOutput(
     items=[ChecklistItem(item="[modo offline]", status="ausente", evidence="Resultado simulado.")]
@@ -112,8 +116,12 @@ async def _run_report(
     """Um relatorio isolado: o erro fica registrado no proprio resultado."""
     is_checklist = report.kind == "checklist"
     # Checklist em JSON, nao por ferramenta de saida: a lista de ferramentas fica
-    # igual em todos os relatorios e nao arrisca quebrar o prefixo do cache.
-    output_type = PromptedOutput(ChecklistOutput) if is_checklist else str
+    # igual em todos os relatorios e nao arrisca quebrar o prefixo do cache. Sem
+    # template: o padrao viraria instrucao antes da minuta e quebraria o prefixo.
+    output_type = (
+        PromptedOutput(ChecklistOutput, template=False) if is_checklist else str
+    )
+    request = f"{report.prompt}\n\n{CHECKLIST_FORMAT}" if is_checklist else report.prompt
     offline_text = (
         OFFLINE_CHECKLIST_JSON
         if is_checklist
@@ -121,8 +129,8 @@ async def _run_report(
     )
 
     try:
-        # A minuta fica no system_prompt, que vai antes das instructions: o
-        # prefixo e identico entre relatorios e so o prompt de cada um varia.
+        # A minuta entra como historico de mensagens: o prefixo e identico entre
+        # relatorios e so o pedido de cada um varia, no fim da conversa.
         agent = Agent(
             build_model(
                 settings,
@@ -133,10 +141,8 @@ async def _run_report(
             output_type=output_type,
             deps_type=AnalysisDeps,
             tools=[search_kb],
-            system_prompt=minuta_system_prompt(text),
-            instructions=report.prompt,
         )
-        result = await agent.run(REPORT_REQUEST, deps=deps)
+        result = await agent.run(request, deps=deps, message_history=minuta_history(text))
     except Exception as exc:
         # Nunca registre o texto da minuta: ele e confidencial.
         logger.warning(
