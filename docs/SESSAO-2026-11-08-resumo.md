@@ -1,14 +1,21 @@
 # Sessao 2026-11-08 — analise de minutas em relatorios sequenciais
 
-Resumo para continuar em outro harness. Estado verificado no repositorio em 2026-11-09.
+Resumo da sessao original. Continuacao verificada no repositorio em 2026-11-09.
 
-## Estado
+## Estado ao fim da sessao de 2026-11-08
 
 - Commit `07b90fd` `feat(agente): adiciona analise de minutas em relatorios sequenciais`, na branch
   `buhlerr/resume-previous-work-session`. 30 arquivos, +2068/-10.
 - Commit `ebd3526` `fix(seguranca): ...`, que fecha os tres achados da revisao. 6 arquivos, +155/-6.
 - `uv run pytest -q` -> 74 testes passando (64 antes, 10 novos). Nao houve push.
 - Fora do commit de proposito: `.commandcode/` (nao faz parte deste trabalho).
+
+## Estado atual (2026-11-09)
+
+- Branch `buhlerr/resume-previous-work-session`: os cinco commits de seguranca chegam a
+  `c2a4068`, seguidos do commit de documentacao desta sessao; branch publicada no remoto.
+- `uv run pytest -q` -> 107 testes passando.
+- Itens 2, 3 e 4 abaixo: item 2 obsoleto, itens 3 e 4 resolvidos.
 
 ## O que foi construido
 
@@ -65,20 +72,28 @@ banco de testes, renderizacao por parser, leitura de arquivo em processo isolado
 de usuario com RAG delimitado, dependencias declaradas e senha fora dos padroes. Decisao em aberto:
 inverter os padroes de privacidade antes das minutas reais.
 
-### 2. Plugin `agent-delegate` — resolvido
+### 2. Plugin `agent-delegate` — obsoleto
 
-Correcao do stdin (`_ssh` usa `DEVNULL` quando nao ha entrada) + 2 testes, commitada como
-`ecb1560`, junto com `README-PORTAVEL.md`. 30 testes do plugin passando.
+O commit `ecb1560`, o diretorio do plugin e o `README-PORTAVEL.md` citados aqui nao existem
+neste repositorio nem em nenhum ponto do historico. Nada a recuperar: item encerrado como
+fora de escopo deste repositorio.
 
-### 3. Ambiente
+### 3. Ambiente — resolvido
 
-`CHAT_MODEL` e `EMBEDDING_MODEL` exportados no terminal sobrepoem o `.env`: remover.
+Precedencia do pydantic-settings: variavel de ambiente exportada > `.env` > default. Por isso
+um `CHAT_MODEL` exportado no terminal vencia o arquivo. Verificado em 2026-11-09: as duas
+variaveis estao ausentes do ambiente. Se voltarem a aparecer, a remocao definitiva e no
+perfil do shell (`$PROFILE`), fora do repositorio.
 
-### 4. Higiene
+### 4. Higiene — resolvido
 
 - `.commandcode/` segue sem versionamento.
-- Aviso do git sobre `.git/worktrees/20261108-175054-council-1eae54` sem permissao de remocao:
-  sobra de delegacao antiga, nao afetou o commit.
+- O aviso sobre `.git/worktrees/20261108-175054-council-1eae54` nao se aplica mais: o diretorio
+  nao existe; restam apenas os worktrees ativos `leia-lab-orchestrator` e `leia-lab-2`.
+- O worktree principal (`master`) estava com ruido: `acornworm/` e `scorpionfish/` apareciam
+  como untracked, e um `src/db/schema_config.sql` orfao (o scaffold com `TODO(human)`) ficava
+  na raiz. Resolvido com `/acornworm/` e `/scorpionfish/` no `.git/info/exclude` (local, sem
+  commit) e remocao do scaffold, que esta substituido pela versao implementada nesta branch.
 
 ## Como retomar
 
@@ -87,8 +102,10 @@ uv run pytest                          # 107 testes
 uv sync && uv run streamlit run src/ui/app.py
 ```
 
-Pendente: itens 3 e 4 e o push. `uv run` carrega o `.env` no ambiente do processo, por isso
-variavel exportada no terminal vence o arquivo.
+Estado em 2026-11-09: 107 testes passando e itens 3 e 4 resolvidos; esta sessao publica a
+branch no remoto. Continua em aberto apenas a decisao de privacidade (inverter
+`CHAT_PROVIDER`/`EMBEDDING_ZERO_RETENTION` antes das minutas reais). Precedencia da
+configuracao: variavel exportada > `.env` > default.
 
 ## Referencias
 
