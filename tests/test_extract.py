@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import io
+import zipfile
 
 import docx
 import pypdf
 import pytest
 
 from src.ingest.extract import (
+    DocumentTooLargeError,
     EmptyDocumentError,
     InvalidDocumentError,
     UnsupportedFileError,
@@ -92,3 +94,31 @@ def test_extract_blank_pdf_raises_empty_document_error():
 
     with pytest.raises(EmptyDocumentError):
         extract_text("escaneado.pdf", buffer.getvalue())
+
+
+def test_extract_rejects_upload_above_the_size_limit(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("src.ingest.extract.MAX_UPLOAD_BYTES", 10)
+
+    with pytest.raises(DocumentTooLargeError):
+        extract_text("minuta.pdf", b"x" * 11)
+
+
+def test_extract_rejects_docx_that_would_inflate_beyond_the_limit(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("word/document.xml", b"\0" * 100_000)
+    monkeypatch.setattr("src.ingest.extract.MAX_DOCX_UNCOMPRESSED_BYTES", 1_000)
+
+    with pytest.raises(DocumentTooLargeError):
+        extract_text("minuta.docx", buffer.getvalue())
+
+
+def test_extract_stops_pdf_reading_when_text_passes_the_limit(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr("src.ingest.extract.MAX_TEXT_CHARS", 5)
+
+    with pytest.raises(DocumentTooLargeError):
+        extract_text("minuta.pdf", _pdf_with_text("Contrato de teste"))

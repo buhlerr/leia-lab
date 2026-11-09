@@ -10,10 +10,18 @@ from __future__ import annotations
 
 import io
 import os
+import zipfile
 
 import docx
 import pypdf
 from docx.text.paragraph import Paragraph
+
+# Os limites valem antes de qualquer biblioteca abrir o arquivo: um zip pequeno
+# pode inflar para gigabytes e esgotar a memoria da maquina.
+MAX_UPLOAD_BYTES = 32 * 1024 * 1024
+MAX_DOCX_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
+# Mesmo teto do pipeline: nao adianta extrair texto que seria recusado depois.
+MAX_TEXT_CHARS = 200_000
 
 
 class DocumentError(ValueError):
@@ -32,11 +40,37 @@ class EmptyDocumentError(DocumentError):
     """Raised when the document yields no text (for example a scanned PDF)."""
 
 
+class DocumentTooLargeError(DocumentError):
+    """Raised when reading the file would exceed the size limits."""
+
+
 def _extract_pdf(data: bytes) -> str:
     """Return the text of every PDF page, joining pages with a blank line."""
     reader = pypdf.PdfReader(io.BytesIO(data))
-    pages = [page.extract_text() or "" for page in reader.pages]
+    pages: list[str] = []
+    total = 0
+    for page in reader.pages:
+        extracted = page.extract_text() or ""
+        total += len(extracted)
+        if total > MAX_TEXT_CHARS:
+            raise DocumentTooLargeError(
+                f"The document has more than {MAX_TEXT_CHARS} characters of text"
+            )
+        pages.append(extracted)
     return "\n\n".join(pages)
+
+
+def _check_docx_uncompressed(data: bytes) -> None:
+    """Sums the declared entry sizes before python-docx expands them in memory."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            total = sum(entry.file_size for entry in archive.infolist())
+    except zipfile.BadZipFile as exc:
+        raise InvalidDocumentError("Could not read the document") from exc
+    if total > MAX_DOCX_UNCOMPRESSED_BYTES:
+        raise DocumentTooLargeError(
+            f"The document expands to more than {MAX_DOCX_UNCOMPRESSED_BYTES} bytes"
+        )
 
 
 def _extract_docx(data: bytes) -> str:
@@ -71,8 +105,15 @@ def extract_text(filename: str, data: bytes) -> str:
     else:
         raise UnsupportedFileError(f"Unsupported file extension: {extension or '<none>'}")
 
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise DocumentTooLargeError(f"The file is larger than {MAX_UPLOAD_BYTES} bytes")
+    if extension == ".docx":
+        _check_docx_uncompressed(data)
+
     try:
         text = extractor(data)
+    except DocumentError:
+        raise
     except Exception as exc:
         raise InvalidDocumentError("Could not read the document") from exc
 

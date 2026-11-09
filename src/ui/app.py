@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import sys
 from pathlib import Path
 
@@ -24,6 +25,24 @@ from src.config import Settings
 from src.db.config_repo import list_minuta_types
 from src.db.connection import init_db
 from src.ingest.extract import DocumentError, extract_text
+
+# A saida do modelo e texto de terceiros. Imagem remota e o vetor de exfiltracao:
+# o navegador busca a URL sozinho ao renderizar. Link comum so sai no clique.
+HTML_MEDIA = re.compile(
+    r"<\s*(img|iframe|object|embed|video|audio|source)\b[^>]*>", re.IGNORECASE
+)
+IMAGE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
+LINK_DEFINITION = re.compile(r"^\s{0,3}\[[^\]]+\]:\s*\S+.*$", re.MULTILINE)
+LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+
+
+def safe_markdown(text: str) -> str:
+    """Mantem a formatacao do relatorio e tira o que o navegador carregaria sozinho."""
+    text = HTML_MEDIA.sub("", text)
+    # As definicoes vem antes das imagens: `![a][1]` perde o destino junto.
+    text = LINK_DEFINITION.sub("", text)
+    text = IMAGE.sub(r"\1", text)
+    return LINK.sub(r"\1", text)
 
 
 def can_submit(has_api_key: bool, consent: bool) -> bool:
@@ -76,7 +95,7 @@ def _render_report(report: ReportResult) -> None:
 
         if report.status == "ok":
             if report.text is not None:
-                st.markdown(report.text)
+                st.markdown(safe_markdown(report.text))
             if report.checklist is not None:
                 st.dataframe(
                     checklist_rows(report.checklist),

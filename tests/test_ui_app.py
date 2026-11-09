@@ -5,7 +5,7 @@ sem Streamlit.
 """
 
 from src.agent.outputs import ChecklistOutput, ChecklistItem
-from src.ui.app import can_submit, checklist_rows, retention_warning
+from src.ui.app import can_submit, checklist_rows, retention_warning, safe_markdown
 
 
 def test_warning_tells_to_use_only_fictional_drafts_without_restriction():
@@ -50,3 +50,23 @@ class TestChecklistRows:
 
     def test_empty_checklist(self):
         assert checklist_rows(ChecklistOutput(items=[])) == []
+
+
+class TestSafeMarkdown:
+    def test_remote_image_is_removed_keeping_the_alt_text(self):
+        text = "veja ![logo](https://exemplo.test/p.png?d=segredo) aqui"
+        assert safe_markdown(text) == "veja logo aqui"
+
+    def test_link_keeps_the_text_and_drops_the_url(self):
+        assert safe_markdown("[clausula 1](https://exemplo.test/x?d=segredo)") == "clausula 1"
+
+    def test_link_definition_is_removed(self):
+        text = "texto\n\n[1]: https://exemplo.test/p.png?d=segredo"
+        assert "exemplo.test" not in safe_markdown(text)
+
+    def test_html_media_tag_is_removed(self):
+        assert safe_markdown('<img src="https://exemplo.test/p.png">ok') == "ok"
+
+    def test_common_markdown_stays_untouched(self):
+        text = "**Negrito**\n\n- item\n\n| a | b |\n|---|---|\n| 1 | 2 |"
+        assert safe_markdown(text) == text
