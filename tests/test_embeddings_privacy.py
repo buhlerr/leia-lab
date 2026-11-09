@@ -34,7 +34,12 @@ def _settings(**overrides) -> Settings:
 
 
 async def test_get_embedding_sends_provider_restriction_when_enabled():
-    body = await _sent_body(_settings(EMBEDDING_ZERO_RETENTION=True))
+    body = await _sent_body(
+        _settings(
+            EMBEDDING_ZERO_RETENTION=True,
+            EMBEDDING_MODEL="openai/text-embedding-3-small",
+        )
+    )
     assert body["provider"] == ZERO_RETENTION
 
 

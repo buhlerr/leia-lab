@@ -51,14 +51,19 @@ Medicao feita: 77% de cache na minuta longa com a DeepSeek real.
 - **Fuga do delimitador** (`src/agent/llm.py`): `neutralize_delimiters` troca o `<` de qualquer
   variante de `<minuta`/`</minuta` escrita pela minuta por `‹`. So o delimitador real abre e fecha
   o bloco, e o prefixo do cache continua identico entre relatorios.
-- **Vazamento pela tela** (`src/ui/app.py`): `safe_markdown` remove imagem HTML, imagem markdown,
-  definicao de referencia e o destino dos links antes do `st.markdown`. O texto dos links e a
-  formatacao ficam. Os tokens `![`, `](` e `]:` restantes sao escapados, para cobrir colchete aninhado
-  e definicao dentro de citacao ou lista.
+- **Vazamento pela tela** (`src/ui/render.py`): o parser remove links e imagens da arvore do Markdown e
+  a tela exibe com `st.html`, para pareceres, erros e rotulos.
 - **Arquivo compactado malicioso** (`src/ingest/extract.py`): `MAX_UPLOAD_BYTES` (32 MiB) checado
   antes de abrir, `_check_docx_uncompressed` soma os tamanhos declarados do zip antes do
   `python-docx` e `_extract_pdf` para ao passar de `MAX_TEXT_CHARS`. Erro novo:
   `DocumentTooLargeError`, que passa direto pelo wrapper em vez de virar `InvalidDocumentError`.
+
+### Auditoria de 2026-11-09
+
+Feita no fluxo de auditoria e correcao em lote da skill `delegar`, um commit por classe: guarda do
+banco de testes, renderizacao por parser, leitura de arquivo em processo isolado, minuta em mensagem
+de usuario com RAG delimitado, dependencias declaradas e senha fora dos padroes. Decisao em aberto:
+inverter os padroes de privacidade antes das minutas reais.
 
 ### 2. Plugin `agent-delegate` — resolvido
 
@@ -78,7 +83,7 @@ Correcao do stdin (`_ssh` usa `DEVNULL` quando nao ha entrada) + 2 testes, commi
 ## Como retomar
 
 ```bash
-uv run pytest                          # 88 testes
+uv run pytest                          # 107 testes
 uv sync && uv run streamlit run src/ui/app.py
 ```
 

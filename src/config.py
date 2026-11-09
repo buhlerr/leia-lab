@@ -1,12 +1,15 @@
 from typing import Literal
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = "postgresql://leia:leia_lab_2026@localhost:5433/leia_lab"
+    # A senha vem da .env; nunca versionar valor real.
+    DATABASE_URL: str = "postgresql://leia@localhost:5433/leia_lab"
     # Banco descartavel da suite: o conftest recria o schema `public` a cada teste.
-    TEST_DATABASE_URL: str = "postgresql://leia:leia_lab_2026@localhost:5433/leia_lab_test"
+    # A senha vem da .env; nunca versionar valor real.
+    TEST_DATABASE_URL: str = "postgresql://leia@localhost:5433/leia_lab_test"
     OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
     OPENROUTER_API_KEY: str = ""
     # "deepseek": API direta, com cache de prefixo, sem opcao de retencao zero.
@@ -26,6 +29,17 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
     )
+
+    @model_validator(mode="after")
+    def _require_paid_embedding_for_zero_retention(self) -> "Settings":
+        # Modelos gratuitos nao tem endpoint sem retencao.
+        if self.EMBEDDING_ZERO_RETENTION and self.EMBEDDING_MODEL.endswith(":free"):
+            raise ValueError(
+                "EMBEDDING_ZERO_RETENTION exige um modelo com endpoint sem retencao; "
+                "modelos gratuitos nao tem essa opcao. Use um modelo pago, como "
+                "openai/text-embedding-3-small."
+            )
+        return self
 
     @property
     def chat_api_key(self) -> str:
