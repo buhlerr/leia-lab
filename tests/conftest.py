@@ -18,6 +18,20 @@ from src.config import Settings
 TEST_DATABASE_URL = Settings().TEST_DATABASE_URL
 
 
+def assert_disposable_database(dsn: str) -> None:
+    """Recusa um DSN que nao aponte para um banco descartavel (sufixo `_test`).
+
+    A fixture `pool` apaga o schema `public`; se TEST_DATABASE_URL apontasse para
+    o banco de desenvolvimento, o DROP apagaria o corpus indexado a mao.
+    """
+    name = urlsplit(dsn).path.lstrip("/")
+    if not name.endswith("_test"):
+        raise RuntimeError(
+            "O banco de testes precisa terminar em '_test' "
+            f"(nome recebido: {name or '<vazio>'})."
+        )
+
+
 def _server_url(dsn: str, database: str) -> str:
     parts = urlsplit(dsn)
     return urlunsplit((parts.scheme, parts.netloc, f"/{database}", "", ""))
@@ -38,6 +52,8 @@ async def _ensure_test_database() -> None:
 @pytest.fixture
 async def pool():
     """Pool para um banco de teste com o schema `public` vazio."""
+    # Sem esta checagem, o DROP abaixo apagaria o corpus se o DSN fosse de dev.
+    assert_disposable_database(TEST_DATABASE_URL)
     await _ensure_test_database()
     created = await asyncpg.create_pool(dsn=TEST_DATABASE_URL, min_size=1, max_size=4)
     assert created is not None

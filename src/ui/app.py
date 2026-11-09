@@ -135,11 +135,25 @@ def _render_result(result: AnalysisResult) -> None:
         _render_report(report)
 
 
+async def _apply_schema(settings) -> None:
+    """Aplica o schema em um pool proprio, fechado em seguida."""
+    async with asyncpg.create_pool(
+        dsn=settings.DATABASE_URL, min_size=1, max_size=2
+    ) as pool:
+        await init_db(pool)
+
+
+@st.cache_resource(show_spinner=False)
+def _ensure_schema(dsn: str) -> bool:
+    """Aplica o schema uma vez por processo; falhas nao ficam no cache."""
+    asyncio.run(_apply_schema(Settings(DATABASE_URL=dsn)))
+    return True
+
+
 async def _with_pool(settings, work):
     async with asyncpg.create_pool(
         dsn=settings.DATABASE_URL, min_size=1, max_size=4
     ) as pool:
-        await init_db(pool)
         return await work(pool)
 
 
@@ -173,6 +187,7 @@ def main() -> None:
         )
 
     try:
+        _ensure_schema(settings.DATABASE_URL)
         types = asyncio.run(
             _with_pool(settings, lambda pool: list_minuta_types(pool))
         )
