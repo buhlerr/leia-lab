@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import re
 import sys
+from html import escape
 from pathlib import Path
 
 # O Streamlit executa este arquivo como script. Para que os imports do pacote
@@ -25,34 +25,7 @@ from src.config import Settings
 from src.db.config_repo import list_minuta_types
 from src.db.connection import init_db
 from src.ingest.extract import DocumentError, extract_text
-
-# A saida do modelo e texto de terceiros. Imagem remota e o vetor de exfiltracao:
-# o navegador busca a URL sozinho ao renderizar. Link comum so sai no clique.
-HTML_MEDIA = re.compile(
-    r"<\s*(img|iframe|object|embed|video|audio|source)\b[^>]*>", re.IGNORECASE
-)
-IMAGE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
-LINK_DEFINITION = re.compile(r"^\s{0,3}\[[^\]]+\]:\s*\S+.*$", re.MULTILINE)
-LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
-ANGLE_AUTOLINK = re.compile(r"<(?=[a-z][a-z0-9+.\-]{1,31}:)", re.IGNORECASE)
-# Sem `\b`: o GFM liga URLs logo depois de `_` ou digito.
-BARE_URL = re.compile(r"(https?(?=://)|www(?=\.))", re.IGNORECASE)
-
-
-def safe_markdown(text: str) -> str:
-    """Mantem a formatacao do relatorio e tira o que o navegador carregaria sozinho."""
-    text = HTML_MEDIA.sub("", text)
-    # As definicoes vem antes das imagens: `![a][1]` perde o destino junto.
-    text = LINK_DEFINITION.sub("", text)
-    text = IMAGE.sub(r"\1", text)
-    text = LINK.sub(r"\1", text)
-    # As regex nao cobrem colchete aninhado nem definicao dentro de citacao ou lista.
-    # Escapar estes tokens impede o parser de formar imagem ou link com o que sobrou.
-    text = text.replace("![", "!\\[").replace("](", "]\\(").replace("]:", "]\\:")
-    # Entidade em vez de barra: uma barra vinda do texto anularia a barra inserida.
-    text = ANGLE_AUTOLINK.sub("&lt;", text)
-    # Barra invertida nao basta: o GFM procura URLs no texto ja sem os escapes.
-    return BARE_URL.sub("\\1\u200b", text)
+from src.ui.render import render_safe_html
 
 
 def can_submit(has_api_key: bool, consent: bool) -> bool:
@@ -96,7 +69,7 @@ def _render_report(report: ReportResult) -> None:
     with st.container(border=True):
         header = st.columns([0.75, 0.25])
         with header[0]:
-            st.markdown(f"**{report.name}**")
+            st.html(f"<strong>{escape(report.name)}</strong>")
         with header[1]:
             if report.status == "ok":
                 st.badge("ok", color="green")
@@ -105,7 +78,7 @@ def _render_report(report: ReportResult) -> None:
 
         if report.status == "ok":
             if report.text is not None:
-                st.markdown(safe_markdown(report.text))
+                st.html(render_safe_html(report.text))
             if report.checklist is not None:
                 st.dataframe(
                     checklist_rows(report.checklist),
@@ -113,19 +86,20 @@ def _render_report(report: ReportResult) -> None:
                     width="stretch",
                 )
         else:
-            st.error(report.error or "Erro desconhecido no relatorio.")
+            st.error("Este relatorio falhou.")
+            st.html(render_safe_html(report.error or "Erro desconhecido."))
 
         cache = (
             f" | Cache: {report.cache_read_tokens} de {report.input_tokens} tokens"
             if report.input_tokens
             else ""
         )
-        st.caption(f"Modelo: {report.model}{cache}")
+        st.html(f"<small>Modelo: {escape(report.model)}{escape(cache)}</small>")
 
 
 def _render_result(result: AnalysisResult) -> None:
     """Exibe o resultado completo da analise."""
-    st.subheader(result.minuta_type_name)
+    st.html(f"<h3>{escape(result.minuta_type_name)}</h3>")
 
     ok_count = sum(1 for r in result.reports if r.status == "ok")
     failed_count = len(result.reports) - ok_count

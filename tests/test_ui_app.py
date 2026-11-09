@@ -1,16 +1,13 @@
-"""Testes das funções puras do app Streamlit.
+"""Testes das funcoes puras do app Streamlit.
 
-Evitam AppTest e banco de dados: cobrem apenas a lógica síncrona e testável
+Evitam AppTest e banco de dados: cobrem apenas a logica sincrona e testavel
 sem Streamlit.
 """
 
-import re
-
 import pytest
-from markdown_it import MarkdownIt
 
 from src.agent.outputs import ChecklistOutput, ChecklistItem
-from src.ui.app import can_submit, checklist_rows, retention_warning, safe_markdown
+from src.ui.app import can_submit, checklist_rows, retention_warning
 
 
 def test_warning_tells_to_use_only_fictional_drafts_without_restriction():
@@ -43,74 +40,15 @@ class TestChecklistRows:
     def test_two_items(self):
         checklist = ChecklistOutput(
             items=[
-                ChecklistItem(item="Cláusula 1", status="presente", evidence="Art. 1"),
-                ChecklistItem(item="Cláusula 2", status="ausente", evidence="Não encontrada"),
+                ChecklistItem(item="Clausula 1", status="presente", evidence="Art. 1"),
+                ChecklistItem(item="Clausula 2", status="ausente", evidence="Nao encontrada"),
             ]
         )
         rows = checklist_rows(checklist)
         assert rows == [
-            {"Item": "Cláusula 1", "Status": "presente", "Evidencia": "Art. 1"},
-            {"Item": "Cláusula 2", "Status": "ausente", "Evidencia": "Não encontrada"},
+            {"Item": "Clausula 1", "Status": "presente", "Evidencia": "Art. 1"},
+            {"Item": "Clausula 2", "Status": "ausente", "Evidencia": "Nao encontrada"},
         ]
 
     def test_empty_checklist(self):
         assert checklist_rows(ChecklistOutput(items=[])) == []
-
-
-class TestSafeMarkdown:
-    def test_remote_image_is_removed_keeping_the_alt_text(self):
-        text = "veja ![logo](https://exemplo.test/p.png?d=segredo) aqui"
-        assert safe_markdown(text) == "veja logo aqui"
-
-    def test_link_keeps_the_text_and_drops_the_url(self):
-        assert safe_markdown("[clausula 1](https://exemplo.test/x?d=segredo)") == "clausula 1"
-
-    def test_link_definition_is_removed(self):
-        text = "texto\n\n[1]: https://exemplo.test/p.png?d=segredo"
-        assert "exemplo.test" not in safe_markdown(text)
-
-    def test_html_media_tag_is_removed(self):
-        assert safe_markdown('<img src="https://exemplo.test/p.png">ok') == "ok"
-
-    def test_common_markdown_stays_untouched(self):
-        text = "**Negrito**\n\n- item\n\n| a | b |\n|---|---|\n| 1 | 2 |"
-        assert safe_markdown(text) == text
-
-    # Conferido no HTML final: regex sobre a sintaxe nao garante o que o parser enxerga.
-    @pytest.mark.parametrize(
-        "text",
-        [
-            "![a[b]c](https://exemplo.test/p.png?d=segredo)",
-            r"![a\]b](https://exemplo.test/p.png?d=segredo)",
-            "[a[b]c](https://exemplo.test/x?d=segredo)",
-            "![a][r]\n\n> [r]: https://exemplo.test/p.png?d=segredo",
-            "![a][r]\n\n- [r]: https://exemplo.test/p.png?d=segredo",
-        ],
-    )
-    def test_evasive_syntax_never_renders_image_or_link_case(self, text):
-        self._assert_inert(text)
-
-    @pytest.mark.parametrize(
-        "text",
-        [
-            "<https://exemplo.test/x?d=segredo>",
-            "<mailto:a@exemplo.test>",
-            "veja https://exemplo.test/x?d=segredo agora",
-            "veja HTTP://exemplo.test/x agora",
-            "veja www.exemplo.test/x?d=segredo agora",
-            r"\<mailto:a@exemplo.test>",
-            "veja _https://exemplo.test/x?d=segredo agora",
-            "veja 1https://exemplo.test/x?d=segredo agora",
-            "veja _www.exemplo.test/x?d=segredo agora",
-        ],
-    )
-    def test_autolinks_are_defanged(self, text):
-        # O CommonMark nao liga URL solta; o GFM da tela liga, entao o texto nao pode casar.
-        self._assert_inert(text)
-        assert not re.search(r"(?i)(https?://|www\.)", safe_markdown(text))
-
-    @staticmethod
-    def _assert_inert(text):
-        html = MarkdownIt("commonmark").render(safe_markdown(text))
-        assert "<img" not in html
-        assert "<a " not in html
