@@ -4,6 +4,8 @@ Evitam AppTest e banco de dados: cobrem apenas a lógica síncrona e testável
 sem Streamlit.
 """
 
+import re
+
 import pytest
 from markdown_it import MarkdownIt
 
@@ -85,7 +87,26 @@ class TestSafeMarkdown:
             "![a][r]\n\n- [r]: https://exemplo.test/p.png?d=segredo",
         ],
     )
-    def test_evasive_syntax_never_renders_image_or_link(self, text):
+    def test_evasive_syntax_never_renders_image_or_link_case(self, text):
+        self._assert_inert(text)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "<https://exemplo.test/x?d=segredo>",
+            "<mailto:a@exemplo.test>",
+            "veja https://exemplo.test/x?d=segredo agora",
+            "veja HTTP://exemplo.test/x agora",
+            "veja www.exemplo.test/x?d=segredo agora",
+        ],
+    )
+    def test_autolinks_are_defanged(self, text):
+        # O CommonMark nao liga URL solta; o GFM da tela liga, entao o texto nao pode casar.
+        self._assert_inert(text)
+        assert not re.search(r"(?i)\b(https?://|www\.)", safe_markdown(text))
+
+    @staticmethod
+    def _assert_inert(text):
         html = MarkdownIt("commonmark").render(safe_markdown(text))
         assert "<img" not in html
         assert "<a " not in html

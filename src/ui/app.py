@@ -34,6 +34,8 @@ HTML_MEDIA = re.compile(
 IMAGE = re.compile(r"!\[([^\]]*)\]\([^)]*\)")
 LINK_DEFINITION = re.compile(r"^\s{0,3}\[[^\]]+\]:\s*\S+.*$", re.MULTILINE)
 LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
+ANGLE_AUTOLINK = re.compile(r"<(?=[a-z][a-z0-9+.\-]{1,31}:)", re.IGNORECASE)
+BARE_URL = re.compile(r"\b(https?(?=://)|www(?=\.))", re.IGNORECASE)
 
 
 def safe_markdown(text: str) -> str:
@@ -45,7 +47,10 @@ def safe_markdown(text: str) -> str:
     text = LINK.sub(r"\1", text)
     # As regex nao cobrem colchete aninhado nem definicao dentro de citacao ou lista.
     # Escapar estes tokens impede o parser de formar imagem ou link com o que sobrou.
-    return text.replace("![", "!\\[").replace("](", "]\\(").replace("]:", "]\\:")
+    text = text.replace("![", "!\\[").replace("](", "]\\(").replace("]:", "]\\:")
+    text = ANGLE_AUTOLINK.sub(r"\\<", text)
+    # Barra invertida nao basta: o GFM procura URLs no texto ja sem os escapes.
+    return BARE_URL.sub("\\1\u200b", text)
 
 
 def can_submit(has_api_key: bool, consent: bool) -> bool:
