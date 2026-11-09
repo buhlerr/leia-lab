@@ -4,6 +4,9 @@ Evitam AppTest e banco de dados: cobrem apenas a lógica síncrona e testável
 sem Streamlit.
 """
 
+import pytest
+from markdown_it import MarkdownIt
+
 from src.agent.outputs import ChecklistOutput, ChecklistItem
 from src.ui.app import can_submit, checklist_rows, retention_warning, safe_markdown
 
@@ -70,3 +73,19 @@ class TestSafeMarkdown:
     def test_common_markdown_stays_untouched(self):
         text = "**Negrito**\n\n- item\n\n| a | b |\n|---|---|\n| 1 | 2 |"
         assert safe_markdown(text) == text
+
+    # Conferido no HTML final: regex sobre a sintaxe nao garante o que o parser enxerga.
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "![a[b]c](https://exemplo.test/p.png?d=segredo)",
+            r"![a\]b](https://exemplo.test/p.png?d=segredo)",
+            "[a[b]c](https://exemplo.test/x?d=segredo)",
+            "![a][r]\n\n> [r]: https://exemplo.test/p.png?d=segredo",
+            "![a][r]\n\n- [r]: https://exemplo.test/p.png?d=segredo",
+        ],
+    )
+    def test_evasive_syntax_never_renders_image_or_link(self, text):
+        html = MarkdownIt("commonmark").render(safe_markdown(text))
+        assert "<img" not in html
+        assert "<a " not in html

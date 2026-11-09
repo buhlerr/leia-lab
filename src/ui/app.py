@@ -42,7 +42,10 @@ def safe_markdown(text: str) -> str:
     # As definicoes vem antes das imagens: `![a][1]` perde o destino junto.
     text = LINK_DEFINITION.sub("", text)
     text = IMAGE.sub(r"\1", text)
-    return LINK.sub(r"\1", text)
+    text = LINK.sub(r"\1", text)
+    # As regex nao cobrem colchete aninhado nem definicao dentro de citacao ou lista.
+    # Escapar estes tokens impede o parser de formar imagem ou link com o que sobrou.
+    return text.replace("![", "!\\[").replace("](", "]\\(").replace("]:", "]\\:")
 
 
 def can_submit(has_api_key: bool, consent: bool) -> bool:
