@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "leia_lab",
+  "project_id": "a25b3590-ddd1-4c91-8e38-7cdafaceddc5"
+}
