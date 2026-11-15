@@ -79,3 +79,16 @@ async def test_dense_search_never_compares_offline_and_real_vectors(pool):
     real = await hybrid_search_rrf(pool, "zzz", real_vec, "openai/text-embedding-3-small", top_k=5)
     assert [r["content"] for r in off] == ["chunk offline"]
     assert [r["content"] for r in real] == ["chunk real"]
+
+
+async def test_dense_search_excludes_chunks_with_unknown_model(pool):
+    await init_db(pool)
+    doc_id = await pool.fetchval("INSERT INTO kb_docs (title) VALUES ('d') RETURNING id")
+    vec = (await embed_text("prazo", OFFLINE)).vector
+    await pool.execute(
+        "INSERT INTO kb_chunks (doc_id, content, sequence_order, embedding, embedding_model) "
+        "VALUES ($1, 'legacy', 0, $2::vector, NULL)",
+        doc_id, _to_pgvector_literal(vec),
+    )
+    # dense-only query (no lexical match): NULL-provenance chunk must not be ranked.
+    assert await hybrid_search_rrf(pool, "zzz", vec, OFFLINE_EMBEDDING_MODEL, top_k=5) == []

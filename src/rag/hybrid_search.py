@@ -111,6 +111,9 @@ async def hybrid_search_rrf(
     ``embedding_model`` must be the model that produced ``query_vector``
     (``EmbeddingResult.model``); the dense branch only ranks chunks stored with
     that same model, so real and offline vectors are never compared.
+    Chunks whose ``embedding_model`` is NULL (legacy rows from before the column
+    existed) have unknown provenance and are deliberately NOT ranked by the dense
+    branch; they stay reachable through the sparse branch only until reindexed.
 
     Each returned dict has ``id``, ``doc_id``, ``title``, ``content`` and
     ``score`` keys, ordered by descending ``score``.
