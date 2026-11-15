@@ -7,9 +7,11 @@ import json
 from typing import Any
 
 import httpx
+from opentelemetry import trace
 
 from src.config import Settings
 
+tracer = trace.get_tracer("src.clients")
 _RETRY_STATUS = {429, 529}
 _MAX_ATTEMPTS = 4
 
@@ -42,7 +44,27 @@ async def call_jev(
 ) -> dict[str, Any]:
     """Faz as ``questions`` ao Jev sobre ``state``; offline sem ``TYPESAFE_API_KEY``."""
     settings = settings or Settings()
+    offline = not settings.TYPESAFE_API_KEY
 
+    # Span manual: os clientes sao httpx cru, sem instrumentacao automatica.
+    # Conteudo do estado = texto JA MASCARADO (o grafo nunca ve texto cru).
+    with tracer.start_as_current_span("call_jev") as span:
+        span.set_attribute("openinference.span.kind", "LLM")
+        span.set_attribute("llm.model_name", "offline-stub" if offline else settings.JEV_MODEL)
+        span.set_attribute("leia.offline", offline)
+        span.set_attribute(
+            "input.value", json.dumps({"state": state, "questions": questions}, ensure_ascii=False)
+        )
+        result = await _call_jev_raw(state, questions, settings)
+        span.set_attribute("output.value", json.dumps(result, ensure_ascii=False))
+        return result
+
+
+async def _call_jev_raw(
+    state: dict[str, Any],
+    questions: dict[str, Any],
+    settings: Settings,
+) -> dict[str, Any]:
     if not settings.TYPESAFE_API_KEY:
         state_text = json.dumps(state, ensure_ascii=False).lower()
         return {

@@ -14,11 +14,16 @@ from src.foundation import gold as G
 from src.foundation.db import init_foundation
 from src.foundation.seed import load_matrix_jsonl, seed_defaults
 from src.graphs.analyze_minuta_graph import analyze, build_analyze_minuta_graph
+from src.tracing import TOOLS
 
 RUNS_DIR = Path(".local") / "gold-runs"  # git-ignored; holds analysis ids + risk ids only
 
 
 async def _main(args: argparse.Namespace) -> None:
+    if getattr(args, "trace", "off") != "off":
+        from src.tracing import setup_tracing
+
+        print("tracing:", setup_tracing(args.trace))
     settings = Settings()
     pool = await asyncpg.create_pool(settings.DATABASE_URL, min_size=1, max_size=4)
     try:
@@ -76,6 +81,9 @@ def main() -> None:
     a.add_argument("file")
     g = sub.add_parser("gold-run", help="analyse the gold minutas (LEIA_MINUTAS_DIR) and score them")
     g.add_argument("--label", required=True)
+    for cmd in (a, g):
+        cmd.add_argument("--trace", choices=list(TOOLS), default="off",
+                         help="registration tool: langsmith|langfuse|phoenix (env keys, never files)")
     c = sub.add_parser("gold-compare", help="compare two labelled gold runs")
     c.add_argument("a")
     c.add_argument("b")

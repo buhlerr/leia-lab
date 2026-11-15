@@ -6,8 +6,11 @@ import json
 import re
 
 import httpx
+from opentelemetry import trace
 
 from src.config import Settings
+
+tracer = trace.get_tracer("src.clients")
 
 _RISK_LINE = re.compile(r"^\s*-\s*([^\s:]+)\s*:\s*(.+?)\s*$", re.MULTILINE)
 _CLAUSE = re.compile(r"<clausula>(.*?)</clausula>", re.DOTALL)
@@ -42,7 +45,36 @@ async def chat_completion(
 ) -> tuple[str, int]:
     """Retorna ``(texto, tokens_usados)``; offline (0 tokens) sem ``OPENROUTER_API_KEY``."""
     settings = settings or Settings()
+    offline = not settings.OPENROUTER_API_KEY
 
+    # Span manual (conteudo mascarado — o grafo nunca ve texto cru).
+    with tracer.start_as_current_span("chat_completion") as span:
+        span.set_attribute("openinference.span.kind", "LLM")
+        span.set_attribute(
+            "llm.model_name", "offline-stub" if offline else settings.CHAT_MODEL
+        )
+        span.set_attribute("leia.offline", offline)
+        span.set_attribute(
+            "input.value",
+            json.dumps({"system": system_prompt, "user": user_prompt}, ensure_ascii=False),
+        )
+        content, tokens = await _chat_completion_raw(
+            system_prompt, user_prompt, settings, temperature=temperature, max_tokens=max_tokens
+        )
+        span.set_attribute("output.value", content)
+        if tokens:
+            span.set_attribute("llm.token_count.total", tokens)
+        return content, tokens
+
+
+async def _chat_completion_raw(
+    system_prompt: str,
+    user_prompt: str,
+    settings: Settings,
+    *,
+    temperature: float,
+    max_tokens: int,
+) -> tuple[str, int]:
     if not settings.OPENROUTER_API_KEY:
         return _offline(system_prompt, user_prompt), 0
 
