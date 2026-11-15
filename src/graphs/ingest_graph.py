@@ -16,7 +16,7 @@ from langgraph.graph import END, START, StateGraph
 
 from src.config import Settings
 from src.ingest.masking import mask_personal_data, resolve_doc_alias, split_contract_text
-from src.rag.embeddings import get_embedding
+from src.rag.embeddings import embed_text
 from src.rag.hybrid_search import _to_pgvector_literal
 
 _EMPTY_TEXT_MSG = "text must be a non-empty string"
@@ -85,7 +85,7 @@ def build_ingest_graph(pool: asyncpg.Pool, settings: Settings | None = None) -> 
 
     async def index_node(state: IngestState) -> dict[str, Any]:
         chunks = state["chunks"]
-        vectors = [await get_embedding(chunk, cfg) for chunk in chunks]
+        embedded = [await embed_text(chunk, cfg) for chunk in chunks]
         async with pool.acquire() as conn, conn.transaction():
             doc_id = await conn.fetchval(
                 "INSERT INTO kb_docs (title, source, metadata) "
@@ -98,8 +98,8 @@ def build_ingest_graph(pool: asyncpg.Pool, settings: Settings | None = None) -> 
                 "INSERT INTO kb_chunks (doc_id, content, sequence_order, embedding, embedding_model) "
                 "VALUES ($1, $2, $3, $4::vector, $5)",
                 [
-                    (doc_id, chunk, i, _to_pgvector_literal(vec), cfg.EMBEDDING_MODEL)
-                    for i, (chunk, vec) in enumerate(zip(chunks, vectors, strict=True))
+                    (doc_id, chunk, i, _to_pgvector_literal(emb.vector), emb.model)
+                    for i, (chunk, emb) in enumerate(zip(chunks, embedded, strict=True))
                 ],
             )
         return {"doc_id": str(doc_id), "chunks_indexed": len(chunks)}

@@ -12,7 +12,7 @@ from langgraph.graph import END, START, StateGraph
 
 from src.clients.llm import chat_completion
 from src.config import Settings
-from src.rag.embeddings import get_embedding
+from src.rag.embeddings import embed_text
 from src.rag.hybrid_search import hybrid_search_rrf
 
 CONSULTA_PROMPT_TEMPLATE = (
@@ -29,6 +29,7 @@ class QueryState(TypedDict, total=False):
     question: str
     top_k: int
     query_vector: list[float]
+    query_model: str
     retrieved_chunks: list[dict[str, Any]]
     parsed_context: str
     prompt: str
@@ -40,11 +41,12 @@ def build_query_graph(pool: asyncpg.Pool, settings: Settings | None = None):
     settings = settings or Settings()
 
     async def embed_query(state: QueryState) -> dict[str, Any]:
-        return {"query_vector": await get_embedding(state["question"], settings)}
+        emb = await embed_text(state["question"], settings)
+        return {"query_vector": emb.vector, "query_model": emb.model}
 
     async def retrieve_chunks(state: QueryState) -> dict[str, Any]:
         chunks = await hybrid_search_rrf(
-            pool, state["question"], state["query_vector"], top_k=state.get("top_k", 4)
+            pool, state["question"], state["query_vector"], state["query_model"], top_k=state.get("top_k", 4)
         )
         return {"retrieved_chunks": chunks}
 

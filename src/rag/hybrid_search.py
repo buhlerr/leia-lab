@@ -32,7 +32,7 @@ WITH dense AS (
         c.id AS chunk_id,
         ROW_NUMBER() OVER (ORDER BY c.embedding <=> $2::text::vector) AS rank_pos
     FROM kb_chunks c
-    WHERE c.embedding IS NOT NULL
+    WHERE c.embedding IS NOT NULL AND c.embedding_model = $6
     ORDER BY c.embedding <=> $2::text::vector
     LIMIT $3
 ),
@@ -102,10 +102,15 @@ async def hybrid_search_rrf(
     pool: asyncpg.Pool,
     query_text: str,
     query_vector: list[float],
+    embedding_model: str,
     top_k: int = 5,
     rrf_k: int = DEFAULT_RRF_K,
 ) -> list[dict[str, Any]]:
     """Run dense + sparse retrieval in Postgres and return RRF-fused chunks.
+
+    ``embedding_model`` must be the model that produced ``query_vector``
+    (``EmbeddingResult.model``); the dense branch only ranks chunks stored with
+    that same model, so real and offline vectors are never compared.
 
     Each returned dict has ``id``, ``doc_id``, ``title``, ``content`` and
     ``score`` keys, ordered by descending ``score``.
@@ -128,6 +133,7 @@ async def hybrid_search_rrf(
         candidate_limit,
         float(rrf_k),
         top_k,
+        embedding_model,
     )
 
     results = [
