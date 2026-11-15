@@ -5,9 +5,35 @@ Fica fora do conftest para poder ser testada como funcao pura, sem Postgres.
 
 from __future__ import annotations
 
+from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from src.config import Settings
+
 TEST_DB_SUFFIX = "_test"
+
+# Caminho absoluto: os testes acham o .env da raiz do repo mesmo quando o
+# pytest e chamado de outra pasta.
+REPO_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
+
+
+class SuiteSettings(BaseSettings):
+    """Bancos usados pela suite. Prioridade: variavel de ambiente > .env > padrao.
+
+    ``DATABASE_URL`` e lido do mesmo arquivo que ``TEST_DATABASE_URL`` para que
+    a guarda compare os dois valores vindos da mesma fonte.
+    """
+
+    TEST_DATABASE_URL: str = "postgresql://leia:leia_lab_2026@localhost:5433/leia_lab_test"
+    DATABASE_URL: str = Settings.model_fields["DATABASE_URL"].default
+
+    model_config = SettingsConfigDict(
+        env_file=REPO_ENV_FILE,
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
 
 class UnsafeTestDatabaseError(RuntimeError):
