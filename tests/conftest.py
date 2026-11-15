@@ -66,3 +66,12 @@ async def pool():
 def settings() -> Settings:
     """Settings apontando para o banco de teste, sem chave de API (modo offline)."""
     return Settings(DATABASE_URL=TEST_DATABASE_URL, OPENROUTER_API_KEY="")
+
+
+@pytest.fixture
+async def fpool(pool):
+    """``pool`` with the foundation schema applied (no seed)."""
+    from src.foundation.db import init_foundation
+
+    await init_foundation(pool)
+    return pool
