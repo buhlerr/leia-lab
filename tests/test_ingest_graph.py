@@ -2,6 +2,7 @@ import pytest
 
 from src.db.connection import init_db
 from src.graphs.ingest_graph import build_ingest_graph
+from src.rag.embeddings import OFFLINE_EMBEDDING_MODEL
 
 
 async def test_ingest_graph_masks_splits_and_indexes_into_pgvector(pool, settings):
@@ -39,7 +40,7 @@ async def test_ingest_graph_masks_splits_and_indexes_into_pgvector(pool, setting
     )
     assert len(chunk_rows) == result["chunks_indexed"]
     assert all("111.222.333-44" not in r["content"] for r in chunk_rows)
-    assert all(r["embedding_model"] == settings.EMBEDDING_MODEL for r in chunk_rows)
+    assert all(r["embedding_model"] == OFFLINE_EMBEDDING_MODEL for r in chunk_rows)
 
 
 async def test_ingest_graph_rejects_empty_text(pool, settings):

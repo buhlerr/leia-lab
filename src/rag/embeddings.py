@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from typing import NamedTuple
 
 import httpx
 
@@ -19,6 +20,42 @@ logger = logging.getLogger(__name__)
 
 EMBEDDING_DIM = 1536
 EMBEDDING_TIMEOUT_SECONDS = 30.0
+
+# Provenance label stored in ``kb_chunks.embedding_model`` for hash vectors. It
+# must never equal a real model id, so real and offline vectors are never
+# compared. Bump the suffix if ``_deterministic_embedding`` ever changes.
+OFFLINE_EMBEDDING_MODEL = "offline-hash-v1"
+
+_offline_warned = False
+
+
+class EmbeddingResult(NamedTuple):
+    """A vector together with the id of the model that produced it."""
+
+    vector: list[float]
+    model: str
+
+
+def effective_embedding_model(settings: Settings) -> str:
+    """Single source of truth for which model ``embed_text`` will use."""
+    return settings.EMBEDDING_MODEL if settings.OPENROUTER_API_KEY else OFFLINE_EMBEDDING_MODEL
+
+
+def _warn_offline_once() -> None:
+    global _offline_warned
+    if not _offline_warned:
+        _offline_warned = True
+        logger.warning(
+            "OPENROUTER_API_KEY not set: using deterministic hash embeddings labelled %r. "
+            "They carry no semantic meaning and are only searchable against other offline vectors.",
+            OFFLINE_EMBEDDING_MODEL,
+        )
+
+
+def _reset_offline_warning() -> None:
+    """Test hook: re-arm the once-per-process warning."""
+    global _offline_warned
+    _offline_warned = False
 
 
 def _deterministic_embedding(text: str, dim: int = EMBEDDING_DIM) -> list[float]:
@@ -46,10 +83,16 @@ def _deterministic_embedding(text: str, dim: int = EMBEDDING_DIM) -> list[float]
 
 
 async def get_embedding(text: str, settings: Settings | None = None) -> list[float]:
-    """Return a 1536-dimension embedding for ``text``.
+    """Return only the vector of :func:`embed_text` (use that when you store or search it)."""
+    return (await embed_text(text, settings)).vector
+
+
+async def embed_text(text: str, settings: Settings | None = None) -> EmbeddingResult:
+    """Return a 1536-dimension embedding for ``text`` plus the model that made it.
 
     Falls back to :func:`_deterministic_embedding` when ``settings`` has no
-    ``OPENROUTER_API_KEY`` (offline / test mode).
+    ``OPENROUTER_API_KEY`` (offline / test mode); the result is then labelled
+    :data:`OFFLINE_EMBEDDING_MODEL`.
     """
     if not text or not text.strip():
         raise ValueError("text must be a non-empty string")
@@ -57,8 +100,8 @@ async def get_embedding(text: str, settings: Settings | None = None) -> list[flo
     settings = settings or Settings()
 
     if not settings.OPENROUTER_API_KEY:
-        logger.debug("OPENROUTER_API_KEY not set: using deterministic fallback embedding")
-        return _deterministic_embedding(text)
+        _warn_offline_once()
+        return EmbeddingResult(_deterministic_embedding(text), OFFLINE_EMBEDDING_MODEL)
 
     url = f"{settings.OPENROUTER_BASE_URL.rstrip('/')}/embeddings"
     payload = {
@@ -83,4 +126,4 @@ async def get_embedding(text: str, settings: Settings | None = None) -> list[flo
             f"Embedding dimension mismatch: expected {EMBEDDING_DIM}, got {len(embedding)}"
         )
 
-    return [float(value) for value in embedding]
+    return EmbeddingResult([float(value) for value in embedding], settings.EMBEDDING_MODEL)

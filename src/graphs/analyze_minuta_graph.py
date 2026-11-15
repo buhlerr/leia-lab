@@ -30,7 +30,7 @@ from src.graphs.minuta_rules import (
     validate_and_format,
 )
 from src.ingest.masking import mask_personal_data, resolve_doc_alias
-from src.rag.embeddings import get_embedding
+from src.rag.embeddings import EmbeddingResult, embed_text
 from src.rag.hybrid_search import hybrid_search_rrf
 
 _EMPTY_TEXT_MSG = "text must be a non-empty string"
@@ -146,9 +146,9 @@ def build_analyze_minuta_graph(
         async with _limiter():
             return await call_jev(state, questions, cfg)
 
-    async def embed(text: str) -> list[float]:
+    async def embed(text: str) -> EmbeddingResult:
         async with _limiter():
-            return await get_embedding(text, cfg)
+            return await embed_text(text, cfg)
 
     async def llm(system: str, user: str) -> tuple[str, int]:
         async with _limiter():
@@ -327,8 +327,8 @@ def build_analyze_minuta_graph(
             if not cl["triado"]:
                 cl["normas"] = []
                 return 0
-            vec = await embed(cl["texto"])
-            docs = await hybrid_search_rrf(pool, cl["texto"], vec, top_k=20)
+            emb = await embed(cl["texto"])
+            docs = await hybrid_search_rrf(pool, cl["texto"], emb.vector, emb.model, top_k=20)
 
             async def nota(d: dict[str, Any]) -> tuple[float, int]:
                 r = await jev({"clausula": cl["texto"], "dispositivo": d["content"]}, _Q_REGULA)
