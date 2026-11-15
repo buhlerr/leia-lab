@@ -21,7 +21,7 @@
 **Estados analisados (SHAs fixos):**
 
 - `master`: `c57df533546061a5c55270161a774006aea15bda` (publicado).
-- acornworm: checkout local `C:/Users/Vitor/dev/leia-lab/acornworm`, ramo `buhlerr/resume-previous-work-session`, HEAD local `40e2732f4396970652949903cfb335ff1c2e9c11` (commit `wip: preserve config admin UI and runtime work`). **Parte deste estado não está publicada:** o ramo remoto está em `45b6d19fe3feaa5688d8cba7d2807acaf85e70fe` e o HEAD local tem 1 commit à frente. Só existem no commit local (não em `origin`): `src/ui/pages/1_Administracao.py`, `src/db/config_admin.py` e `.delegateignore`. A linha *UI* e o que depende dela (reaproveitar a tela de administração no protótipo A) descrevem estado **local/não publicado**, que não pode ser aberto por quem só tem o remoto. Os demais arquivos citados (`schema_config.sql`, `config_repo.py`, `pipeline.py`, `classifier.py`, `config.py`) existem em `45b6d19`.
+- acornworm: checkout local `C:/Users/Vitor/dev/leia-lab/acornworm`, ramo `buhlerr/resume-previous-work-session`, HEAD local `40e2732f4396970652949903cfb335ff1c2e9c11` (commit `wip: preserve config admin UI and runtime work`). **Parte deste estado não está publicada:** o ramo remoto está em `45b6d19fe3feaa5688d8cba7d2807acaf85e70fe` e o HEAD local tem 1 commit à frente. Só existem no commit local (não em `origin`): `src/db/config_admin.py`, `src/ui/pages/1_Administracao.py`, `src/ui/runtime.py` e `tests/test_config_admin.py`, mais alterações em `src/ui/app.py` (diff `45b6d19..40e2732`). O `.delegateignore` **está publicado** no ramo do acornworm (`45b6d19`); só não está em `master`. A linha *UI* e o que depende dela (reaproveitar a tela de administração no protótipo A) descrevem estado **local/não publicado**, que não pode ser aberto por quem só tem o remoto. Os demais arquivos citados (`schema_config.sql`, `config_repo.py`, `pipeline.py`, `classifier.py`, `config.py`) existem em `45b6d19`.
 
 | Critério | `master` (src/graphs, LangGraph) | acornworm (branch `buhlerr/resume-previous-work-session`, pydantic-ai) |
 |---|---|---|
@@ -164,5 +164,5 @@ Protótipos descartáveis, fora do caminho principal (Q10). Usar o mesmo conjunt
 
 - Leitura de páginas oficiais em 2026-11-15; Context7 (via Composio) para documentação de bibliotecas, páginas web para preços/licenças. Alguns links redirecionaram (`ai.pydantic.dev` → `pydantic.dev/docs/ai`, `docs.directus.io` → `directus.com/docs`).
 - Sem teste prático: tudo é documentação, nenhum comportamento foi executado. Valores em dólar são preço de lista.
-- `.delegateignore` não está em `master` (só no commit local, não publicado, do acornworm), então não houve delegação ao Command Code; o mapeamento de código foi feito diretamente.
+- `.delegateignore` não está em `master` (só no ramo do acornworm, publicado em `45b6d19`), então não houve delegação ao Command Code; o mapeamento de código foi feito diretamente.
 - Candidato trocado: **nenhum**. O par Directus foi avaliado junto ao Langfuse por serem complementares (um cobre domínio, o outro, LLM-ops).
