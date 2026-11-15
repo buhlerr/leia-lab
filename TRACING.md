@@ -47,7 +47,12 @@ Detalhes que custaram tempo e ficam registrados:
 |---|---|---|---|
 | **Phoenix self-hosted** | sem limite (infra própria) | **107 spans** (análise real, 32 alertas) | só disco/RAM do CT (<1 GB) |
 | **Langfuse Cloud Hobby** | 50.000 unidades/mês | **~108 unidades** (107 observações + 1 traço) | **~460 análises/mês** |
-| **LangSmith Developer** | 5.000 traços/mês | 1 traço/análise | **~5.000 análises/mês** (traços) |
+| **LangSmith Developer** | 5.000 traços/mês | **1 traço** (9 runs, 1 raiz) | **~5.000 análises/mês** |
+
+**A unidade é o que decide.** O Langfuse cobra traço **+ cada observação** + score; a LangSmith
+cobra “All traces”, e trace = a árvore inteira (1 raiz). Medido com a mesma minuta real: a
+LangSmith envia 9 runs mas conta **1**; o Langfuse conta **~108**. É uma diferença de ~10× na
+margem que vem da definição de unidade, não do tamanho do plano.
 
 O número varia com o tamanho da minuta: o grafo faz 1 chamada Jev por cláusula × risco candidato.
 A análise sintética de 2 cláusulas gera 17 spans; a real gera ~107. **O orçamento tem de ser feito
@@ -55,8 +60,8 @@ com a minuta real**, não com a sintética.
 
 ## O que faltou
 
-- O LangSmith não foi medido por análise (só a privacidade foi provada); o número 5k traços/mês é
-  da tabela do plano, não de uma contagem local. Se o traço incluir sub-runs, a margem cai.
+- O LangSmith foi medido em runs/traços com a minuta real (9 runs, 1 raiz ⇒ 1 traço cobrado), mas
+  a confirmação final é no painel de billing da conta (consumo aparece com atraso de minutos).
 - Nenhuma ferramenta registra, por si só, *qual versão da matriz* decidiu — isso continua na
   trilha do Postgres (design da F). O rastreio é a vista de depuração, não a fonte da auditoria.
 - O Langfuse Cloud Hobby dá 2 usuários; o time maior exige plano pago.
