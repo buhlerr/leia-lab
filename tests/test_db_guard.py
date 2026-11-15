@@ -94,3 +94,9 @@ def test_defaults_point_to_a_safe_test_database(tmp_path, no_db_env):
 def test_env_file_is_the_one_at_the_repo_root():
     assert REPO_ENV_FILE.name == ".env"
     assert (REPO_ENV_FILE.parent / "pyproject.toml").is_file()
+
+
+def test_suite_settings_reads_the_repo_env_file_by_default():
+    # Os testes acima passam `_env_file=` e por isso nao pegariam uma
+    # SuiteSettings que deixasse de ler o .env: este verifica a ligacao padrao.
+    assert SuiteSettings.model_config["env_file"] == REPO_ENV_FILE
