@@ -33,6 +33,6 @@ Used by `/wayfinder`; `/to-tickets` uses **Blocking** too. The **map** is a sing
 - **Map**: an epic labelled `wayfinder:map`, holding the Destination / Notes / Decisions so far / Added so far / Not yet specified / Out of scope body. `bd create "<title>" -t epic -l wayfinder:map --body-file -`.
 - **Child ticket**: `bd create "<question>" --parent <map-id> -l wayfinder:<type>`, where `<type>` is `research`/`prototype`/`grilling`/`task`. Once claimed, the ticket is assigned to the driving dev.
 - **Blocking**: `bd dep add <blocked-id> <blocker-id>` (same as `--blocked-by`). A ticket is unblocked when every blocker is closed.
-- **Frontier query**: `bd ready --parent <map-id> --json` (open, no active blockers, not in progress); drop any with an assignee; first in creation order wins.
+- **Frontier query**: `bd ready --parent <map-id> --sort oldest --json` (open, no active blockers, not in progress; `--sort oldest` because the default order is by priority); drop any with an assignee; first in creation order wins.
 - **Claim**: `bd update <id> --claim` (atomic: sets you as assignee and status `in_progress`), the session's first write.
 - **Resolve**: `bd comments add <id> "<answer>"`, then `bd close <id> --reason "<gist>"`, then append a context pointer (gist + id) to the map's Decisions-so-far with `bd update <map-id> --body-file -`.
