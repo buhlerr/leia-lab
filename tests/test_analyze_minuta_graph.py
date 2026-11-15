@@ -100,3 +100,114 @@ async def test_unsupported_doc_never_calls_ficha_triar_buscar_analisar(pool, set
     out = await graph.ainvoke({"raw_text": "ATA DE ASSEMBLEIA GERAL.", "filename": "ata.txt"})
     assert out["report_envelope"]["status"] == "unsupported"
     assert calls == ["tipo"]
+
+
+_MINUTA = (
+    "CONTRATO DE LOCAÇÃO RESIDENCIAL\n"
+    "Cláusula 1ª - Do Prazo e Valor: A locação inicia em 01/04/2026 pelo prazo de 30 meses, "
+    "com aluguel mensal de R$ 2.800,00 e demais encargos ajustados entre as partes.\n"
+    "Cláusula 2ª - Do Reajuste: O aluguel será reajustado semestralmente pelo índice IGP-M, "
+    "conforme ajustado entre as partes neste instrumento contratual."
+)
+_RISCOS = {
+    "reajuste_e_indexacao": [
+        {
+            "id": "REAJ-01",
+            "risco": "Reajuste em periodicidade inferior a 12 meses",
+            "cor": "vermelho",
+            "parte": "locatario",
+            "normas": [{"id": "lei-10192-2001-art-2", "citacao": "Lei 10.192/2001, art. 2º"}],
+        }
+    ]
+}
+
+
+async def test_triage_cutoff_gates_risk_checks(pool, settings, monkeypatch):
+    # Clauses below triage_cutoff must not reach the per-risk Jev check nor produce alerts.
+    import src.graphs.analyze_minuta_graph as mod
+    from src.clients.jev import call_jev as real
+
+    asked: list[set[str]] = []
+
+    async def spy(state, questions, settings=None):
+        asked.append(set(questions))
+        res = await real(state, questions, settings)
+        if "risco" in questions:
+            res["answers"]["risco"]["noul"] = 0.05
+        return res
+
+    monkeypatch.setattr(mod, "call_jev", spy)
+    await init_db(pool)
+    graph = mod.build_analyze_minuta_graph(
+        pool, settings, riscos=_RISCOS, temas=["reajuste_e_indexacao"], tema_map={}
+    )
+    out = await graph.ainvoke({"raw_text": _MINUTA, "filename": "minuta.txt"})
+
+    assert not any("REAJ-01" in q for q in asked)
+    assert all(cl["checks"] == [] and cl["confirmados"] == [] for cl in out["clausulas"])
+    assert out["report_envelope"]["content"]["alerts"] == []
+
+
+async def test_jev_concurrency_is_capped_across_nested_fanouts(pool, settings, monkeypatch):
+    import asyncio
+
+    import src.graphs.analyze_minuta_graph as mod
+    from src.clients.jev import call_jev as real
+
+    inflight = 0
+    peak = 0
+
+    async def spy(state, questions, settings=None):
+        nonlocal inflight, peak
+        inflight += 1
+        peak = max(peak, inflight)
+        await asyncio.sleep(0.005)
+        try:
+            return await real(state, questions, settings)
+        finally:
+            inflight -= 1
+
+    monkeypatch.setattr(mod, "call_jev", spy)
+    await init_db(pool)
+    ingest = build_ingest_graph(pool, settings)
+    for i in range(6):
+        await ingest.ainvoke({"raw_text": f"Norma {i}: reajuste do aluguel e prazo.", "filename": f"n{i}.txt", "doc_name": f"Norma {i}"})
+    clausulas = "\n".join(
+        f"Cláusula {i}ª - Do Reajuste: O aluguel será reajustado semestralmente pelo índice IGP-M, "
+        "conforme ajustado entre as partes neste instrumento contratual de locação residencial."
+        for i in range(1, 13)
+    )
+    graph = mod.build_analyze_minuta_graph(
+        pool, settings, riscos=_RISCOS, temas=["reajuste_e_indexacao"], tema_map={}
+    )
+    await graph.ainvoke({"raw_text": "CONTRATO DE LOCAÇÃO RESIDENCIAL\n" + clausulas, "filename": "m.txt"})
+
+    assert 1 < peak <= mod._CONCURRENCY
+
+
+async def test_tema_map_ids_resolve_to_citation_without_duplicates_or_empty_norms(pool, settings):
+    await init_db(pool)
+    ingest = build_ingest_graph(pool, settings)
+    await ingest.ainvoke(
+        {
+            "raw_text": "Lei 10.192/2001, art. 2º - É nula a estipulação de reajuste inferior a um ano.",
+            "filename": "lei.txt",
+            "doc_name": "Lei 10.192/2001, art. 2º",
+        }
+    )
+    graph = build_analyze_minuta_graph(
+        pool,
+        settings,
+        riscos=_RISCOS,
+        temas=["reajuste_e_indexacao"],
+        # id known to the matrix, plus one id/citation absent from the KB.
+        tema_map={"reajuste_e_indexacao": ["lei-10192-2001-art-2", "lei-9999-inexistente"]},
+    )
+    out = await graph.ainvoke({"raw_text": _MINUTA, "filename": "minuta.txt"})
+
+    for cl in out["clausulas"]:
+        citacoes = [n["citacao"] for n in cl["normas"]]
+        assert len(citacoes) == len(set(citacoes))  # id and citation are one key
+        assert all(n["texto"] for n in cl["normas"])  # no empty-text norm reaches the writer
+        assert "lei-10192-2001-art-2" not in citacoes and "lei-9999-inexistente" not in citacoes
+    assert any(n["citacao"] == "Lei 10.192/2001, art. 2º" for cl in out["clausulas"] for n in cl["normas"])
