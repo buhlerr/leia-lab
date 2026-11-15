@@ -7,7 +7,9 @@
 
 ## 1. Resumo e recomendação
 
-**Finalistas recomendados**
+> **Atualização (adendo B2b, leia-lab-1g1.8):** depois de comparar também ferramentas de gestão de dados de domínio (seção 9), a recomendação passa a ser expressa como **combinações** motor + rastreio + gestão. Prototipar **C1 = LangGraph + LangSmith + Django Admin** e **C2 = LangGraph + Langfuse + Directus** (detalhes, ranking e provas em 9.6 e 9.7). A lista abaixo é a versão inicial e fica como histórico.
+
+**Finalistas recomendados (versão inicial)**
 
 1. **Finalista A: LangGraph (motor de `master`) + LangSmith (SaaS).** Menor reescrita; um fornecedor cobre rastreio, hub de prompts, datasets/avaliações e Studio. Gestão de matriz de riscos, temas e base normativa continua a construir.
 2. **Finalista B: Langfuse + Directus, motor-agnóstico (protótipo sobre o shell/pydantic-ai do acornworm).** Langfuse cobre rastreio, prompts e avaliação (núcleo MIT, self-host possível); Directus dá uma tela CRUD pronta sobre as tabelas de domínio (tipos de minuta, matriz, temas, base normativa). Como o Langfuse tem integração com LangGraph **e** pydantic-ai, esse par não prende a escolha do motor (Q5).
@@ -106,7 +108,7 @@ Legenda: ● nativo / ◐ parcial ou com ressalva / ○ a construir.
 - **Preços (Cloud).** Core US$ 89/mês anual (3 assentos, 25 coleções, 5 Flows); Team US$ 588/mês anual; a página é inconsistente (FAQ cita US$ 499/US$ 599). Self-host em todos os níveis. [F] <https://directus.com/pricing>
 - **Banco existente.** Introspecta tabelas e relações existentes; metadados de interface precisam ser configurados; relações ausentes no banco precisam ser criadas no Directus. [F] <https://directus.com/docs/guides/data-model/collections> (via Context7)
 - **Permissões.** Políticas aditivas, permissões por campo e por ação. [F] <https://directus.com/docs/guides/auth/access-control>
-- **Atividade/auditoria.** Registra Create/Update/Delete/Comment/Login com usuário, data, IP, coleção e item, **sem valores antes/depois**; só vê o que passa pela plataforma; **admins podem modificar itens de atividade** em coleções não-sistema. [F] <https://directus.com/docs/guides/auth/accountability>. Revisões por item: **não encontrado** nas páginas lidas. Logo **não serve como trilha de auditoria** do Q8; serve como CRUD. [I]
+- **Atividade/auditoria.** Registra Create/Update/Delete/Comment/Login com usuário, data, IP, coleção e item, **sem valores antes/depois**; só vê o que passa pela plataforma; **admins podem modificar itens de atividade** em coleções não-sistema. [F] <https://directus.com/docs/guides/auth/accountability>. Revisões por item (dados + *delta*) existem, ver 9.2 (adendo B2b). O log de atividade sozinho **não serve como trilha de auditoria** do Q8. [I]
 - **Tipos.** JSON e CSV existem; arrays Postgres e `vector` **não aparecem**. [F] <https://directus.com/docs/guides/data-model/fields>. Risco para `kb_chunks.embedding`; mitigação: expor só `kb_docs`. [I]
 - **Flows** disparam por evento, agenda ou webhook. [F] <https://directus.com/docs/>. Limites por plano (5 no Core).
 
@@ -133,14 +135,16 @@ Protótipos descartáveis, fora do caminho principal (Q10). Usar o mesmo conjunt
 3. **Gold set**: rodar o conjunto, ver nota por risco esperado vs. detectado e comparar duas versões de prompt ou de matriz. O avaliador será código (compara ids de risco).
 4. **Tipo de minuta como dado**: adicionar um segundo tipo (ex.: stub) sem mexer em código.
 
-**Específico do A (LangGraph + LangSmith)**
+> **Atualizado pelo adendo B2b (leia-lab-1g1.8):** os dois protótipos passam a ser as **combinações** motor + rastreio + gestão **C1** e **C2** da seção 9.6, ambas sobre o motor LangGraph de `master` (o motor fica como variável controlada; pydantic-ai entra só como checagem de instrumentação). Os itens "Comum" abaixo continuam valendo; os itens específicos foram reorganizados em C1/C2 e ampliados em 9.7. As antigas "A" e "B" abaixo são mantidas apenas como histórico do que cada ferramenta de rastreio deve provar.
+
+**Histórico: específico do rastreio LangSmith (antigo A)**
 - Grafo de `master` com Postgres checkpointer e `get_state_history`; o Studio abre o grafo e permite editar um prompt e ver o efeito.
 - **`raw_text` ausente do estado persistido**: após uma análise, varrer as tabelas do checkpointer, a saída de `get_state_history` e o estado de *thread* do grafo implantado (Agent Server local/Studio) e provar que não há nome/CPF nem o texto cru (risco descrito em 2 e 4.1).
 - Prompt Hub: alterar prompt por um não-dev e a próxima execução usar a nova versão (`production`).
 - Anonimizador funcionando em nós do LangGraph; medir traços e custo por análise (preço por traço não encontrado).
 - Esforço para construir a tela de matriz/temas/base (Streamlit do acornworm reaproveitado, com autenticação; atenção: a página de administração existe só no commit local `40e2732`, ainda não publicado).
 
-**Específico do B (Langfuse + Directus)**
+**Histórico: específico de Langfuse + Directus (antigo B)**
 - Directus sobre o Postgres: CRUD de `minuta_types`, `minuta_reports`, matriz e temas por um não-dev, com papéis; ver se `kb_docs` aparece e o que ocorre com colunas `vector`/arrays.
 - Mudança feita no Directus vale na próxima análise (sem cache).
 - Langfuse (self-host via Docker Compose e/ou Cloud): prompt editado na UI; experimento via UI sobre o gold set; medir unidades por análise contra o limite do plano; custo/esforço de operar PostgreSQL + ClickHouse + Redis + S3.
@@ -166,3 +170,134 @@ Protótipos descartáveis, fora do caminho principal (Q10). Usar o mesmo conjunt
 - Sem teste prático: tudo é documentação, nenhum comportamento foi executado. Valores em dólar são preço de lista.
 - `.delegateignore` não está em `master` (só no ramo do acornworm, publicado em `45b6d19`), então não houve delegação ao Command Code; o mapeamento de código foi feito diretamente.
 - Candidato trocado: **nenhum**. O par Directus foi avaliado junto ao Langfuse por serem complementares (um cobre domínio, o outro, LLM-ops).
+
+## 9. Adendo B2b: camada de gestão dos dados de domínio (leia-lab-1g1.8)
+
+Pedido do usuário: nenhum framework de LLM gerencia os dados de domínio (matriz de riscos, temas, tipos de minuta, base normativa) e só o Directus tinha sido avaliado nessa categoria. Esta seção compara ferramentas de gestão e atualiza a recomendação, agora como **combinações** motor + rastreio + gestão. Leitura de páginas oficiais em 2026-11-15; mesma convenção **[F]/[I]/[R]** do cabeçalho. Sem delegação ao Command Code: o `.delegateignore` ainda não está em `master`.
+
+Critérios: (a) CRUD por não desenvolvedores com papéis/login; (b) **histórico/versionamento das linhas de domínio** (para uma análise registrar qual versão da matriz decidiu; liga ao Q8, e importa se o histórico é imutável ou editável por admin); (c) funciona direto sobre as tabelas Postgres existentes, com relações e colunas vector/array; (d) licença e custo; (e) esforço de self-host; (f) encaixe com a stack Python e carga de manutenção.
+
+### 9.1 Conclusão principal sobre versionamento (critério b)
+
+**Nenhuma ferramenta garante sozinha um histórico imutável das linhas de domínio [F+I]:**
+
+- Directus: revisões guardam cópia do item e *delta*, mas só para mudanças que passam pela plataforma, e a própria documentação manda "remover periodicamente" dados de `directus_revisions`. A leitura das revisões fica restrita a admins/editores.
+- Django + django-simple-history: guarda estado e `history_user` a cada gravação, mas só captura o que passa pelo ORM (não captura SQL cru, gatilhos ou outros serviços, nem `bulk_*`/`.update()` sem os helpers). Se o admin pode editar/apagar as linhas de histórico: **não encontrado** na documentação atual.
+- NocoDB: histórico por registro é somente leitura ("não é possível editar ou apagar"), mas a retenção depende do plano e a auditoria do workspace é Scale+.
+- Appsmith, ToolJet, Budibase: auditoria de eventos, não de valores de linha (Budibase: auditoria de linhas "não suportada" por padrão).
+
+**[R] Projetar o versionamento fora da ferramenta de gestão**, em dois níveis. Isso torna a escolha da ferramenta de gestão menos crítica para o Q8:
+
+1. **Snapshot por análise**: cada análise grava, no seu próprio registro, o `id` da versão da matriz/prompt e uma cópia (JSON + hash) das regras efetivamente usadas. A análise fica autossuficiente mesmo se a matriz mudar depois.
+2. **Histórico *append-only* por gatilho no Postgres** nas tabelas de domínio (inserir em tabela de histórico a cada INSERT/UPDATE/DELETE; sem UPDATE/DELETE para os papéis da aplicação). Pega escritas de qualquer ferramenta, inclusive SQL manual. Vale como histórico oficial; o histórico nativo da ferramenta de gestão vira conveniência de UI.
+
+### 9.2 Categoria 1: painéis de administração sobre o Postgres existente
+
+Legenda: ● atende / ◐ parcial ou com ressalva / ○ não atende ou não encontrado.
+
+| | Directus | Django Admin + simple-history | NocoDB | Appsmith | ToolJet | Budibase |
+|---|---|---|---|---|---|---|
+| (a) CRUD por não devs + papéis | ● políticas por coleção/campo | ◐ permissões add/change/delete/view **por modelo**, grupos; por campo exige código | ◐ papéis Owner/Creator/Editor/Commenter/Viewer; por campo só plano Business | ◐ telas **construídas à mão**; papéis customizados no Business | ◐ telas à mão; grupos; RLS só Enterprise | ◐ telas geradas das tabelas buscadas, ajustadas à mão |
+| (b) histórico das linhas | ◐ revisões (dados + *delta*) só via plataforma; admin pode purgar | ◐ histórico com *diff* e usuário; só via ORM; editabilidade não confirmada | ◐ histórico por registro somente leitura; retenção por plano | ○ só eventos de auditoria (Business) | ○ só eventos de auditoria (Team) | ○ auditoria de linhas não suportada por padrão |
+| (c) tabelas existentes, vector/array | ◐ introspecção; tipos desconhecidos **não documentado** | ◐ `inspectdb` gera modelos não gerenciados; tipo desconhecido vira `TextField` ("palpite"); `VectorField` via pgvector-python | ◐ conecta PG externo; flags de edição de dados/esquema; tipos **não encontrado** | ○ não encontrado | ○ não encontrado | ◐ "Fetch tables"; mapeamento de tipos **não encontrado**; relações só internas ao Budibase |
+| (d) licença / custo | MSCL (fonte disponível; grátis < US$ 5 mi e < 50 pessoas); Cloud a partir de US$ 89/mês | BSD (Django e simple-history); sem custo | Sustainable Use License (uso interno OK); Comunidade grátis; Cloud Business US$ 24/assento (Plus **não** aceita banco externo) | Apache-2.0; Business US$ 15/usuário (até 99) | **AGPLv3**; Team US$ 199/construtor | GPLv3 geral, BSL em `/packages/pro`; Cloud a partir de US$ 299/mês |
+| (e) self-host | Docker; tabelas `directus_*` **no mesmo banco** | Aplicação Django + tabelas próprias de auth/admin/histórico | 2 vCPU/2 GB mín.; banco de metadados próprio | Docker/K8s; mínimos não encontrados | Postgres 16 + Redis 7, x86 | CouchDB interno |
+| (f) Python / manutenção | JS/Node; config majoritariamente sem código; Flows chamam HTTP | **Python**; ModelAdmin é código a manter, mas pequeno | JS; sem código | JS | JS | JS |
+
+**Fontes por ferramenta [F]:**
+
+- **Django Admin / simple-history:** `inspectdb` (modelos não gerenciados; tipos não mapeados viram `TextField` com comentário "guess") <https://docs.djangoproject.com/en/stable/ref/django-admin/#inspectdb>; permissões padrão <https://docs.djangoproject.com/en/stable/topics/auth/default/>; `LogEntry` registra só alterações feitas pelo admin e, na edição, a lista de campos editados, sem valores antigos/novos <https://docs.djangoproject.com/en/stable/ref/contrib/admin/#logentry-objects>; licença BSD <https://github.com/django/django/blob/main/LICENSE>; `VectorField` e `HnswIndex` <https://github.com/pgvector/pgvector-python>; simple-history (BSD-3, versão 3.13.0 de 2026-07-22; `history_user`, `diff_against`, revert no admin, limites de `bulk_*`/`F()`/escritas externas) <https://django-simple-history.readthedocs.io/en/latest/>, <https://django-simple-history.readthedocs.io/en/latest/common_issues.html>, <https://django-simple-history.readthedocs.io/en/latest/historical_model.html>, <https://django-simple-history.readthedocs.io/en/latest/admin.html>. Nada encontrado sobre simple-history com modelos `inspectdb`: o `HistoricalRecords` precisa ser declarado no modelo (escrito/editado à mão).
+- **Directus:** revisões "criadas sempre que um item é atualizado", com cópia versionada completa e mudanças específicas <https://directus.com/docs/guides/data-model/collections>; API de revisões (`data` e `delta`; só leitura documentada) <https://directus.com/docs/api/revisions>; Content Versioning por coleção <https://directus.com/docs/guides/content/content-versioning> (limite por plano **não informado**; revisões/versionamento não aparecem como recurso de plano em <https://directus.com/pricing>); boas práticas (leitura de `directus_revisions` só para admins/editores) <https://directus.com/docs/guides/security/best-practices>; limites: sem chaves compostas nem tabelas virtuais por view <https://directus.com/docs/guides/data-model/collections>; Flows com gatilho de evento (ação não bloqueante) e operação "Request URL" (HTTP) <https://directus.com/docs/guides/flows/triggers>, <https://directus.com/docs/guides/flows/operations>; licença/preço <https://github.com/directus/directus>, <https://directus.com/license>, <https://directus.com/pricing>. **Correção ao 4.5:** a rodada anterior não achou revisões; elas existem. Mesmo assim o comportamento diante de `vector`, `text[]` e `tsvector` **não está documentado**.
+- **NocoDB:** licença Sustainable Use v1.0, "uso interno do negócio" <https://github.com/nocodb/nocodb/blob/develop/LICENSE.md>; preços (Comunidade grátis; Plus US$ 12 sem banco externo; Business US$ 24 com 10 conexões externas e permissões por campo; Scale US$ 45 com RLS e auditoria) <https://nocodb.com/pricing>; papéis <https://nocodb.com/docs/product/collaboration/roles-and-permissions>; histórico por registro somente leitura, retenção por plano <https://nocodb.com/docs/product/tables/records/expand-record>; auditoria do workspace Scale+ <https://nocodb.com/docs/product/workspaces/workspace-audit>; conexão com Postgres externo, "Allow Data Edit" ligado e "Allow Schema Edit" desligado por padrão <https://nocodb.com/docs/product/integrations/data-sources/connect-to-data-source>; self-host <https://nocodb.com/docs/self-hosting>. Valores antes/depois no histórico e tratamento de `vector`/`tsvector`: **não encontrado**.
+- **Appsmith:** Apache-2.0 <https://github.com/appsmithorg/appsmith/blob/release/LICENSE>; planos <https://www.appsmith.com/pricing>; auditoria de eventos (sem valores de linha) <https://docs.appsmith.com/advanced-concepts/audit-logs>.
+- **ToolJet:** AGPLv3 <https://github.com/ToolJet/ToolJet/blob/develop/LICENSE>; planos (retenção de auditoria divergente: 14 dias na tabela de preços, 90 dias na doc) <https://www.tooljet.com/pricing>, <https://docs.tooljet.com/docs/security/audit-logs/>; requisitos <https://docs.tooljet.com/docs/setup/system-requirements/>.
+- **Budibase:** GPLv3 geral, BSL em `/packages/pro` <https://github.com/Budibase/budibase/blob/master/LICENSE>; preços <https://budibase.com/pricing>; auditoria de linhas "não suportada" por padrão <https://docs.budibase.com/docs/audit-logs>; conexão SQL <https://docs.budibase.com/docs/sql-datasource>; CouchDB interno <https://docs.budibase.com/docs/data-sources>.
+
+**Leitura [I/R]:**
+
+- **Appsmith, ToolJet e Budibase não entram nos protótipos.** Todos exigem montar cada tela, nenhum tem histórico de linhas, e ToolJet (AGPL, US$ 199/construtor) e Budibase (CouchDB + licença mista) têm custo/licença menos favoráveis. Se algum for reconsiderado, Appsmith (Apache-2.0, US$ 15/usuário) é o melhor dos três.
+- **NocoDB fica como reserva:** licença de fonte disponível, plano Plus não conecta banco externo, tratamento de tipos desconhecido; o histórico somente leitura é um ponto a favor.
+- Colunas `vector`/`tsvector`: nenhuma documentação cobre. Mitigação: as ferramentas só precisam das tabelas de matriz, temas, tipos, relatórios/prompts e `kb_docs`; para `kb_chunks`, expor somente leitura **sem a coluna `embedding`**.
+- Não troquei candidatos: as seis ferramentas do pedido foram avaliadas e a evidência já separa Directus e Django Admin como as duas melhores.
+
+### 9.3 Categoria 2: gestão da base normativa (leis e jurisprudência)
+
+| | Dify | RAGFlow | Manter `ingest_graph` + vista no painel |
+|---|---|---|---|
+| Licença | Apache-2.0 **modificada**: sem multi-tenant sem autorização por escrito; não remover logo/copyright do console | Apache-2.0 | n/a (código nosso) |
+| Reaproveita nossas tabelas/pgvector? | Não encontrado: pgvector é opção de armazenamento (`PGVECTOR_*`), padrão Weaviate; sem mapear `kb_docs`/`kb_chunks` existentes. A API de conhecimento externo deixa o Dify **chamar** um endpoint `/retrieval` nosso, mas ingestão, edição de chunks e teste ficam no armazém do Dify | **Não**: armazém de documentos é Elasticsearch (padrão), Infinity, OceanBase, OpenSearch etc.; pgvector não é opção (Postgres só como banco de metadados) | Sim (é o que existe: `kb_docs`, `kb_chunks`, `hybrid_search_rrf`) |
+| Inspeção/edição de chunks | Sim: adicionar/editar/desativar chunks (adicionar em lote só em planos pagos da nuvem); teste de recuperação na UI | "Visualização de chunks com intervenção humana" (README); detalhes **não verificados** | Vista somente leitura de `kb_chunks` no painel (sem `embedding`); edição de chunk **não** recomendada sem reindexação controlada |
+| Reindexação | Troca do modelo de embedding no nível da KB; reindexar por documento: **não encontrado** | **Não verificado** | Ação que chama o `ingest_graph` (Django: *admin action* em Python; Directus: Flow com webhook) |
+| Hospedagem | 2 núcleos/4 GiB mín.; stack próprio (api, worker, nginx, Weaviate…) | Recomendado 4 núcleos/16 GB/50 GB; Elasticsearch, MySQL, MinIO etc.; v1.0.0 lançada em 2026-11-06 | Já existe |
+| Sobreposição | **Alta**: traz motor de workflows/agentes e observabilidade próprios | Média: foco em parsing/RAG; armazém próprio | Nenhuma |
+| Português do Brasil | Não verificado | README em pt-BR; parsing/OCR em português **não encontrados** | Já tratado (`to_tsvector('portuguese')`) |
+
+**Fontes [F]:** Dify: <https://github.com/langgenius/dify/blob/main/LICENSE>, <https://dify.ai/pricing>, <https://docs.dify.ai/en/cloud/use-dify/knowledge/readme.md>, <https://docs.dify.ai/en/cloud/use-dify/knowledge/manage-knowledge/maintain-knowledge-documents.md>, <https://docs.dify.ai/en/cloud/use-dify/knowledge/test-retrieval.md>, <https://docs.dify.ai/en/cloud/use-dify/knowledge/external-knowledge-api.md>, <https://docs.dify.ai/en/self-host/deploy/quick-start/docker-compose.md>; a lista de armazéns vetoriais veio de resumo automático parcial de <https://docs.dify.ai/en/self-host/deploy/configuration/environments.md> (tratar como secundária). RAGFlow: <https://github.com/infiniflow/ragflow>, <https://github.com/infiniflow/ragflow/blob/main/docker/.env>, <https://github.com/infiniflow/ragflow/blob/main/docker/README.md>; a documentação em ragflow.io/docs não renderizou, então a API de recuperação e a edição de chunks **não foram verificadas**.
+
+**[R]** Não adotar Dify nem RAGFlow como camada de gestão da base normativa: nenhum reaproveita nossas tabelas, ambos criariam uma segunda fonte da verdade a reindexar, e o Dify ainda traria um motor concorrente. Manter o `ingest_graph` e dar a ele uma **vista de gestão** (lista de documentos, inspeção de chunks, ação de reindexar, envio de arquivo) no painel escolhido. Risco de privacidade menor aqui [I]: a base normativa contém leis e jurisprudência públicas, não minutas.
+
+### 9.4 Categoria 3: revisão humana para o conjunto de referência (gold set)
+
+| | Argilla | Label Studio | Langfuse (filas de anotação) |
+|---|---|---|---|
+| Licença | Apache-2.0 | Apache-2.0 (Community) | MIT (núcleo) |
+| Custo | grátis (Docker/Hugging Face) | Community grátis; nuvem Starter US$ 99/mês + US$ 49/usuário extra | Cloud: 1 fila (Hobby), 3 (Core), ilimitadas (Pro+); self-host OSS: ilimitadas |
+| Hospedagem | Docker com Elasticsearch | `pip`/Docker; Postgres/requisitos **não encontrado** | já faz parte do Langfuse |
+| Papéis | owner/admin/annotator | Owner/Admin/Manager/Reviewer/Annotator (RBAC no Starter+) | RBAC de organização; papel mínimo para anotar **não informado** |
+| Recursos relevantes | datasets, SDK Python, campos/perguntas customizáveis | LLM-as-a-judge e logs de atividade listados como Enterprise (mapeamento por edição ambíguo na página) | scores com *score configs* e comentários; "saídas corrigidas"; fila ligada ao traço |
+| Ressalvas | manutenção atual **não verificada** | pricing movido para humansignal.com | escrever o valor esperado direto no item de dataset a partir da fila: **não encontrado** |
+
+**Fontes [F]:** Argilla <https://docs.argilla.io/latest/>, <https://docs.argilla.io/latest/getting_started/how-to-deploy-argilla-with-docker/>, <https://docs.argilla.io/latest/how_to_guides/user/>; Label Studio <https://humansignal.com/pricing/>, <https://labelstud.io/>; Langfuse <https://langfuse.com/docs/evaluation/evaluation-methods/annotation-queues>, <https://langfuse.com/pricing>, <https://langfuse.com/pricing-self-host>.
+
+**[R]** Não adicionar Argilla nem Label Studio agora. As filas do Langfuse (ou a fila de anotação da LangSmith, listada na página de preços) já cobrem "revisor aceita/rejeita/corrige" para um gold set pequeno; a revisão por cláusula também pode ser feita no painel de gestão se o gold set virar tabela de domínio. Reavaliar só se a revisão exigir fluxos que as filas não oferecem (a provar no protótipo).
+
+### 9.5 O que o motor e o rastreio mudam (e o que não mudam)
+
+O painel de gestão e o rastreio são **independentes do motor** (dados em Postgres; Langfuse e LangSmith aceitam LangGraph; Langfuse também aceita pydantic-ai). A evidência de reescrita (seção 2) favorece manter o motor de `master`: ele já tem Jev, matriz, mascaramento e validação, enquanto o acornworm não tem matriz, máscara nem trilha. Por isso os protótipos usam o **mesmo motor (LangGraph de `master`)** e variam só rastreio e gestão. A decisão A × B × C entre motores (Q5) fica para o ADR-0002; o pydantic-ai segue como checagem de instrumentação de 1 dia no Langfuse (já está no acornworm).
+
+### 9.6 Combinações ranqueadas (motor + rastreio + gestão)
+
+| # | Combinação | Por que | Principais riscos |
+|---|---|---|---|
+| **1 (prototipar C1)** | **LangGraph + LangSmith + Django Admin** (com histórico por gatilho + snapshot por análise) | Menor reescrita; tudo em Python; BSD, sem limite de faturamento; `inspectdb` + `ModelAdmin` pequenos; `diff_against` dá comparação de versões; Studio/Prompt Hub/datasets da LangSmith; ação de reindexar em Python | Admin é código a manter; permissões por modelo, não por campo; UI datada; LangSmith: SaaS (self-host só Enterprise), preço por traço não encontrado |
+| **2 (prototipar C2)** | **LangGraph + Langfuse + Directus** | Gestão por configuração (papéis por campo, revisões com *delta*, Flows com webhook para reindexar); Langfuse MIT, pode ser hospedado por nós, filas de anotação ilimitadas no self-host | Licença MSCL (elegibilidade a confirmar); revisões purgáveis por admin; `vector`/arrays não documentados; Langfuse self-host pesado (ClickHouse + Redis + S3); Cloud Core limita 25 coleções |
+| 3 (não prototipar; sai do cruzamento) | LangGraph + Langfuse + Django Admin | Combina licenças abertas (MIT + BSD) | Mesmos riscos do Django; resultado inferível dos protótipos 1 e 2 |
+| 4 | LangGraph + LangSmith + NocoDB | Histórico por registro somente leitura | Licença de fonte disponível; Plus não conecta banco externo; tipos desconhecidos; retenção por plano |
+| 5 | pydantic-ai (acornworm) + Langfuse + Django/Directus | Zero migração do acornworm | Reconstruir matriz, mascaramento e trilha; só se o G1 escolher o motor B |
+| fora | Qualquer motor + Appsmith/ToolJet/Budibase; Dify; RAGFlow; Langflow | Sem histórico de linhas / telas à mão / sobreposição / segurança | ver 9.2, 9.3 e 4.3 |
+
+**Nota [I]:** a diferença entre as combinações 1 e 2 é **pequena** e vem de licença, stack e custo de manutenção, não de superioridade funcional comprovada. Como painel e rastreio são independentes, o protótipo pode apontar Django Admin **e** Directus para o mesmo esquema e as duas ferramentas de rastreio para o mesmo grafo, comparando cada camada separadamente a custo marginal; a combinação 3 sai então quase de graça.
+
+### 9.7 O que cada protótipo deve demonstrar (atualiza a seção 6)
+
+**Comum a C1 e C2**
+1. **Versionamento do Q8**: uma análise antiga continua mostrando a matriz/prompt que a decidiu depois de a matriz mudar (snapshot por análise), e o histórico oficial vem do gatilho *append-only*. Provar também uma escrita direta por `psql` (a ferramenta de gestão **não** a vê, o gatilho sim) e uma tentativa de apagar/editar histórico por um admin da ferramenta.
+2. **Edição por não dev**: alguém sem acesso a código muda um risco, um tema e um prompt de relatório, e a **próxima** análise usa a nova versão, sem implantação.
+3. **Tabelas existentes**: a ferramenta lê/edita matriz, temas, tipos, relatórios e `kb_docs` sem mover dados; mostrar o que acontece com `kb_chunks` (colunas `vector`, `tsvector`) e confirmar que só se expõe sem `embedding`.
+4. **Base normativa**: lista de documentos, inspeção de chunks (somente leitura), envio de arquivo e **reindexação acionada pela ferramenta** chamando o `ingest_graph`.
+5. Os itens "Comum aos dois" da seção 6 (trilha reconstruível, nenhum texto cru fora do processo incluindo checkpoints, gold set, tipo de minuta como dado).
+
+**Específico de C1 (LangGraph + LangSmith + Django Admin)**
+- `inspectdb` sobre o esquema: o que vira `TextField` ("guess") para `vector`/`tsvector`; usar `VectorField` ou excluir; tamanho real do código de `ModelAdmin`.
+- Permissões por grupo (editor de matriz × só leitura) sem código por campo; medir o que falta.
+- simple-history: capturar edições feitas no admin, mostrar `diff_against`, e o que **não** captura (SQL cru, `bulk_*`).
+- Ação de admin "reindexar" em Python; Studio/Prompt Hub/anonimizador/custo por traço como na seção 6.
+
+**Específico de C2 (LangGraph + Langfuse + Directus)**
+- Introspecção do Directus sobre `vector`, `text[]`, `tsvector`, `jsonb` (ignora? quebra? lê?); tabelas `directus_*` criadas no mesmo banco.
+- Revisões com *delta* presentes; tentativa de purga por admin; papel sem acesso a `directus_revisions`.
+- Flow com webhook (ação não bloqueante) que dispara a reindexação; limite de coleções/Flows do plano Cloud; confirmar elegibilidade à MSCL.
+- Langfuse: prompt editado na UI, experimento via UI sobre o gold set, fila de anotação com revisor; unidades por análise; esforço de operar PostgreSQL + ClickHouse + Redis + S3.
+
+**Critérios de saída:** os da seção 6 (trilha reconstruível, não-dev edita sem ajuda, gold set comparando versões, horas de reescrita, custo mensal) mais: (f) **versão da matriz recuperável por análise após edição e após escrita por fora da ferramenta**; (g) horas para entregar a tela de gestão.
+
+### 9.8 Lacunas e perguntas abertas deste adendo
+
+1. Comportamento de Directus, NocoDB, Appsmith, ToolJet e Budibase com `vector`/`tsvector`/`text[]`: **não documentado**; só o protótipo resolve.
+2. simple-history: editar/apagar linhas de histórico no admin (a configuração `SIMPLE_HISTORY_EDIT` do changelog 1.7.0 não foi reconfirmada) e uso com modelos `inspectdb`: **não encontrado**.
+3. Directus: limite de plano para Content Versioning e revisões (**não informado**); página de preços inconsistente (Team US$ 588 × US$ 499).
+4. NocoDB: divergência entre a página de papéis e a de preços sobre Teams no self-host; retenção do histórico por plano lida pela ordem das colunas (inferência).
+5. Dify: lista de armazéns vetoriais veio de resumo parcial; RAGFlow: documentação oficial não renderizou, recuperação/edição de chunks e preço da nuvem não verificados.
+6. Argilla: estado de manutenção não verificado; Label Studio: Postgres/requisitos e mapeamento por edição de logs/revisão não confirmados.
+7. Context7 não foi usado nesta rodada (perguntas de licença, preço e hospedagem, só nas páginas oficiais); a rodada anterior usou Context7 para Directus e Langfuse.
+8. Pergunta ao humano: a organização se enquadra na MSCL do Directus (receita < US$ 5 mi e < 50 pessoas)? Se não, C2 perde força e a combinação 3 sobe.
