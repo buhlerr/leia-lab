@@ -144,3 +144,7 @@ Single-context: one `GLOSSARY.md` at the root, ADRs in `docs/adr/` once the firs
 ### External peers
 
 `auto`: picks the Claude or Codex adapter from the host family (CLI default model, effort `high`). See `docs/agents/cross-model.json`.
+
+## Admin board
+
+Optional local panel from the great_cto plugin, used only to view the Beads of this repo (no great_cto agents, hooks, pipeline or skills). Setup, requirements and what it shows: `docs/agents/board.md`.
