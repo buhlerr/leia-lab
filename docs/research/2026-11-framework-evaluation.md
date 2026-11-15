@@ -18,6 +18,11 @@
 
 ## 2. O que já existe (mapeamento de código, somente leitura)
 
+**Estados analisados (SHAs fixos):**
+
+- `master`: `c57df533546061a5c55270161a774006aea15bda` (publicado).
+- acornworm: checkout local `C:/Users/Vitor/dev/leia-lab/acornworm`, ramo `buhlerr/resume-previous-work-session`, HEAD local `40e2732f4396970652949903cfb335ff1c2e9c11` (commit `wip: preserve config admin UI and runtime work`). **Parte deste estado não está publicada:** o ramo remoto está em `45b6d19fe3feaa5688d8cba7d2807acaf85e70fe` e o HEAD local tem 1 commit à frente. Só existem no commit local (não em `origin`): `src/ui/pages/1_Administracao.py`, `src/db/config_admin.py` e `.delegateignore`. A linha *UI* e o que depende dela (reaproveitar a tela de administração no protótipo A) descrevem estado **local/não publicado**, que não pode ser aberto por quem só tem o remoto. Os demais arquivos citados (`schema_config.sql`, `config_repo.py`, `pipeline.py`, `classifier.py`, `config.py`) existem em `45b6d19`.
+
 | Critério | `master` (src/graphs, LangGraph) | acornworm (branch `buhlerr/resume-previous-work-session`, pydantic-ai) |
 |---|---|---|
 | Tipos de minuta | Fixo no código: `classificar` decide `locacao_residencial` vs `nao_suportado` (`analyze_minuta_graph.py`, `_Q_TIPO`). Sem conceito de tipo configurável. | **Sim, em banco**: `minuta_types` e `minuta_reports` (`schema_config.sql`), com prompt, modelo e ordem de execução por relatório. |
@@ -27,10 +32,12 @@
 | Mascaramento de PII | **Sim**: `ingest/masking.py`, nó `mascarar` antes de qualquer chamada externa. | **Não tem.** |
 | Histórico de análises | **Não persiste.** O resultado vive no estado do grafo. | **Não persiste** (`AnalysisResult` em memória; sem tabela de análises). |
 | Trilha por passo | O estado carrega boa parte da trilha (`clausulas[].checks`, `candidatas`, `normas`, `analise_bruta`, `stats`) mas é descartado ao fim da execução. | Só `ReportResult` (status, modelo, tokens). Nada sobre "por quê". |
-| UI | Nenhuma. | Streamlit + página de administração (**sem autenticação**, documentado no próprio arquivo). |
-| Endurecimento | Texto de minuta fora de logs/exceções; semáforo global de chamadas externas. | Injeção de prompt, extração isolada, config DeepSeek/OpenRouter com retenção zero, ~107 testes. |
+| UI | Nenhuma. | Streamlit (`src/ui/app.py`) + página de administração (**sem autenticação**, documentado no próprio arquivo). **A página de administração só existe no commit local `40e2732`, não publicado.** |
+| Endurecimento | Texto de minuta fora de logs/exceções; semáforo global de chamadas externas. | Injeção de prompt, extração isolada, provedor de LLM configurável: **OpenRouter** com retenção zero opcional (`ZERO_RETENTION_PROVIDER = {zdr: true, data_collection: deny}`, `src/config.py`); **DeepSeek (o `CHAT_PROVIDER` padrão) é API direta, sem opção de retenção zero**, e a UI avisa para usar só minutas fictícias com ele; ~107 testes (contagem informada pelo humano, não reexecutada). |
 
 **Achado de privacidade [F, código]:** em `master`, `read_file` grava `raw_text` no estado e `mascarar` o lê dali (`analyze_minuta_graph.py:166-182`). Qualquer ferramenta que capture o estado/entradas de cada nó (LangSmith, Langfuse) enviaria o **texto cru** a um terceiro, contrariando o Q2 ("mascarar antes de toda chamada externa"). Todo protótipo precisa resolver isso (retirar `raw_text` do estado ou aplicar máscara no export do traço).
+
+**Mesmo risco, fora das ferramentas de rastreio [I]:** o *checkpointer* do LangGraph grava o estado completo a cada passo. Com `raw_text` no estado, o texto cru ficaria nos checkpoints do Postgres, em `get_state_history` e no estado de *thread* de um grafo implantado (Agent Server/Studio), sem chamada externa explícita. Retirar `raw_text` do estado cobre todos esses casos; mascarar só o export de traços não cobre.
 
 ## 3. Tabela comparativa
 
@@ -60,6 +67,7 @@ Legenda: ● nativo / ◐ parcial ou com ressalva / ○ a construir.
 - **Studio / edição de prompts.** O Studio roda grafos implantados na LangSmith ou localmente via Agent Server; tem modo Chat "útil para usuários de negócio", edição de prompt direto no nó e "Run experiment" sobre dataset sem código. [F] <https://docs.langchain.com/langsmith/studio>, <https://docs.langchain.com/langsmith/observability-studio.md>. Disponibilidade por plano: não confirmada.
 - **Prompt Hub.** Commits com *diff*, tags `staging`/`production`, promoção e *rollback* pela UI; "prompts frequentemente precisam ser editados por quem não é engenheiro". [F] <https://docs.langchain.com/langsmith/manage-prompts.md>, <https://docs.langchain.com/langsmith/prompt-engineering>.
 - **Avaliação.** `evaluate()` sobre datasets versionados (`as_of`), filtro por metadados; regras online e filas de anotação. [F] <https://docs.langchain.com/langsmith/manage-datasets>. Datasets têm retenção indefinida. [F] <https://docs.langchain.com/langsmith/usage-and-billing.md>
+- **Risco de privacidade no estado [I]:** o estado persistido pelo checkpointer e o estado de *thread* no Agent Server contêm tudo o que está no estado do grafo; com o `raw_text` atual de `master` isso guarda o texto cru (ver seção 2). Mitigação a testar: tirar `raw_text` do estado (ler e mascarar no mesmo nó).
 - **Hospedagem/licença/custo.** Plus: US$ 39/assento, 10 mil traços base, 1 Agent Server serverless pequeno; Enterprise: self-host/híbrido. Retenção: 14 dias (base), 180 dias (estendida, taxa **não informada**). Regiões: GCP US/EU/APAC, AWS US, Azure US; SOC 2 Tipo 2, HIPAA, GDPR; LGPD **não encontrado**; sem região no Brasil. LangGraph é MIT. [F] <https://www.langchain.com/pricing>, <https://docs.langchain.com/langsmith/cloud.md>, <https://docs.langchain.com/langsmith/regions-faq>, <https://github.com/langchain-ai/langgraph>. Self-host exige plano Enterprise e chave de licença. [F] <https://docs.langchain.com/langsmith/self-hosted>
 - **Mascaramento.** Existem `LANGSMITH_HIDE_INPUTS/OUTPUTS/METADATA`, `create_anonymizer` (regex/função) e `process_inputs/outputs`; o anonimizador é ignorado quando `HIDE_INPUTS` está ligado; "redação não é controle de acesso". [F] <https://docs.langchain.com/langsmith/mask-inputs-outputs.md>. Aplicação a nós do LangGraph: sem exemplo explícito. [I] deve funcionar por ser nível de cliente; **o protótipo tem de provar**.
 - **Lock-in.** Ferramentas de gestão (Hub, Studio, avaliações) são proprietárias; o código do grafo permanece MIT. [I]
@@ -127,9 +135,10 @@ Protótipos descartáveis, fora do caminho principal (Q10). Usar o mesmo conjunt
 
 **Específico do A (LangGraph + LangSmith)**
 - Grafo de `master` com Postgres checkpointer e `get_state_history`; o Studio abre o grafo e permite editar um prompt e ver o efeito.
+- **`raw_text` ausente do estado persistido**: após uma análise, varrer as tabelas do checkpointer, a saída de `get_state_history` e o estado de *thread* do grafo implantado (Agent Server local/Studio) e provar que não há nome/CPF nem o texto cru (risco descrito em 2 e 4.1).
 - Prompt Hub: alterar prompt por um não-dev e a próxima execução usar a nova versão (`production`).
 - Anonimizador funcionando em nós do LangGraph; medir traços e custo por análise (preço por traço não encontrado).
-- Esforço para construir a tela de matriz/temas/base (Streamlit do acornworm reaproveitado, com autenticação).
+- Esforço para construir a tela de matriz/temas/base (Streamlit do acornworm reaproveitado, com autenticação; atenção: a página de administração existe só no commit local `40e2732`, ainda não publicado).
 
 **Específico do B (Langfuse + Directus)**
 - Directus sobre o Postgres: CRUD de `minuta_types`, `minuta_reports`, matriz e temas por um não-dev, com papéis; ver se `kb_docs` aparece e o que ocorre com colunas `vector`/arrays.
@@ -155,5 +164,5 @@ Protótipos descartáveis, fora do caminho principal (Q10). Usar o mesmo conjunt
 
 - Leitura de páginas oficiais em 2026-11-15; Context7 (via Composio) para documentação de bibliotecas, páginas web para preços/licenças. Alguns links redirecionaram (`ai.pydantic.dev` → `pydantic.dev/docs/ai`, `docs.directus.io` → `directus.com/docs`).
 - Sem teste prático: tudo é documentação, nenhum comportamento foi executado. Valores em dólar são preço de lista.
-- `.delegateignore` não está em `master` (só no acornworm), então não houve delegação ao Command Code; o mapeamento de código foi feito diretamente.
+- `.delegateignore` não está em `master` (só no commit local, não publicado, do acornworm), então não houve delegação ao Command Code; o mapeamento de código foi feito diretamente.
 - Candidato trocado: **nenhum**. O par Directus foi avaliado junto ao Langfuse por serem complementares (um cobre domínio, o outro, LLM-ops).
