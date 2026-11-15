@@ -11,3 +11,6 @@ __pycache__/
 .beads-credential-key
 .beads/proxieddb/
 *.gate.lock*
+
+# planning-with-files working plans (per-bead)
+.planning/
