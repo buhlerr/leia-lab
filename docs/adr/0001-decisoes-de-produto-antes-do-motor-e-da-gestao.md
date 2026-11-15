@@ -22,7 +22,7 @@ Antes de escolher o motor (LangGraph, pydantic-ai ou outro) e a ferramenta de ge
 
 **Privacidade**
 
-- **Q2.** Mascarar dados pessoais é suficiente para enviar o texto da minuta a qualquer provedor, inclusive Jev/TypeSafe. **O mascaramento é obrigatório antes de toda chamada externa.** Entendimento atual, **ainda sem fonte citável e a confirmar** (informado pelo responsável do produto na entrevista de 2026-11-15; não foi verificado na política ou nos termos da TypeSafe, e deve ser revisto quando eles forem consultados): a TypeSafe não treina com as entradas, processa nos EUA, não declara prazo de retenção, e a retenção zero só existe sob pedido no plano enterprise.
+- **Q2.** Mascarar dados pessoais é suficiente para enviar o texto da minuta a qualquer provedor, inclusive Jev/TypeSafe. **O mascaramento é obrigatório antes de toda chamada externa.** Fatos verificados em 2026-11-15 nas páginas da própria TypeSafe (política de privacidade, atualizada em 2025-11-19, <https://typesafe.ai/legal/privacy-policy>; FAQ enterprise, <https://typesafe.ai/enterprise>), a rever quando a política mudar: a TypeSafe não treina com as entradas, processa nos EUA, não declara prazo de retenção, e a retenção zero só existe sob pedido no plano enterprise.
 
 **Gestão sem desenvolvedor**
 
@@ -35,7 +35,7 @@ Antes de escolher o motor (LangGraph, pydantic-ai ou outro) e a ferramenta de ge
 
 **Domínio**
 
-- **Q6.** **Cada tipo de minuta exige a sua própria matriz de riscos.** A criticidade vem da matriz, nunca do LLM (como já descreve o README do repositório externo [`buhlerr/leia-kb-legislacao`](https://github.com/buhlerr/leia-kb-legislacao), que não faz parte deste repositório).
+- **Q6.** **Cada tipo de minuta exige a sua própria matriz de riscos.** A criticidade vem da matriz, nunca do LLM (como já descreve o README da base local fora do repositório (`leia-kb-legislacao/`, não versionada aqui)).
 
 **Critérios de escolha**
 
@@ -51,8 +51,9 @@ Antes de escolher o motor (LangGraph, pydantic-ai ou outro) e a ferramenta de ge
 
 - **Congelamento.** Nenhuma funcionalidade nova é escrita em `master` nem na branch acornworm até o ADR-0002. Correções de defeito continuam permitidas.
 - **Épico de avaliação.** O trabalho passa a ser conduzido pelo épico `leia-lab-1g1`, que termina no ADR-0002 com o esboço de migração.
-- **Obrigação de mascaramento.** Qualquer caminho que envie texto de minuta a um serviço externo (Jev, LLM, embeddings, SaaS de gestão ou de observabilidade) deve passar antes por `mask_personal_data`. Isso vale também para os candidatos da avaliação: um SaaS que receba texto de minuta só é elegível se receber o texto mascarado. A máscara cobre formatos conhecidos e nomes ou endereços podem escapar (ver o README do repositório externo [`buhlerr/leia-kb-legislacao`](https://github.com/buhlerr/leia-kb-legislacao), seção "Dados e privacidade"); a decisão Q2 aceita esse risco residual. Se o código do acornworm for mantido, ele precisa ganhar o mascaramento, porque hoje não o tem.
+- **Obrigação de mascaramento.** Qualquer caminho que envie texto de minuta a um serviço externo (Jev, LLM, embeddings, SaaS de gestão ou de observabilidade) deve passar antes por `mask_personal_data`. Isso vale também para os candidatos da avaliação: um SaaS que receba texto de minuta só é elegível se receber o texto mascarado. A máscara cobre formatos conhecidos e nomes ou endereços podem escapar (ver o README da base local não versionada `leia-kb-legislacao/`, seção "Dados e privacidade"); a decisão Q2 aceita esse risco residual. Se o código do acornworm for mantido, ele precisa ganhar o mascaramento, porque hoje não o tem.
 - **Matriz por tipo de minuta.** O modelo de dados e a interface precisam tratar a matriz de riscos e os temas como pertencentes a um tipo de minuta. Hoje o código tem uma única matriz de locação residencial (`DEFAULT_RISCOS`, `DEFAULT_TEMAS`, `load_risk_matrix`), e o tipo `locacao_residencial` está fixo na pergunta de classificação. Adicionar um tipo deve ser dado (matriz e prompts), não código.
+- **Ponto em aberto: matriz e base normativa não versionadas.** Hoje a base normativa e a matriz de riscos completas vivem numa pasta local fora do git (`leia-kb-legislacao/`); no repositório há só o padrão embutido de `src/graphs/minuta_rules.py` (`DEFAULT_RISCOS`, `DEFAULT_TEMAS`). Isso não é uma decisão: falta definir onde a matriz e a base passam a ser versionadas e auditadas, o que a avaliação de gestão (Q3/Q4) deve considerar.
 - **Criticidade fora do LLM.** O LLM redige a explicação, mas não decide a existência nem a cor de um alerta. Qualquer framework escolhido tem de preservar essa fronteira e a validação determinística.
 - **Trilha como requisito eliminatório.** Um candidato que não registre, por análise, o que cada etapa decidiu e por quê, está fora, mesmo que vença nos desempates.
 

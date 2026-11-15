@@ -26,7 +26,7 @@ _Avoid_: ficha do contrato, metadados
 
 **Matriz de riscos**:
 Lista de riscos de um tipo de minuta, agrupados por tema, cada um com criticidade, parte prejudicada e normas de fundamento. É a única fonte de criticidade.
-_Avoid_: levantamento (é o nome da pasta, não do conceito), checklist
+_Avoid_: levantamento, checklist
 
 **Tema**:
 Assunto de uma cláusula (ex.: reajuste e indexação, garantias locatícias). Agrupa os riscos da matriz e decide quais riscos se checam em cada cláusula.
@@ -37,7 +37,7 @@ Situação descrita na matriz que torna uma cláusula perigosa para a parte prej
 _Avoid_: alerta, achado
 
 **Criticidade**:
-Gravidade de um risco, fixada na matriz: vermelho (mais grave) ou amarelo (a matriz real usa também verde, ver Ambiguidades). Nunca é decidida pelo LLM.
+Gravidade de um risco, fixada na matriz: vermelho (mais grave) ou amarelo (o código aceita também verde, ver Ambiguidades). Nunca é decidida pelo LLM.
 _Avoid_: severidade, cor, nível
 
 **Parte prejudicada**:
@@ -80,10 +80,10 @@ Termos que o código usa de forma inconsistente. A definição acima é a propos
 
 - **"risco"** tem dois sentidos em `src/graphs/analyze_minuta_graph.py`: o item da matriz (campo `risco`, texto) e a nota de triagem de uma cláusula (`cl["risco"]`, número de 0 a 1, vinda da pergunta `_Q_RISCO`). O segundo deveria se chamar *nota de triagem*.
 - **"triado"** muda de sentido no meio do fluxo: em `triar` passa a valer "nota de triagem acima do corte" e, após a checagem da matriz, é sobrescrito por "ao menos um risco confirmado". A mesma flag serve a duas perguntas.
-- **Criticidade** aparece como `criticidade_sugerida` (matriz), `cor` (`minuta_rules.py`) e `severity` (relatório), com valores em português (`vermelho`) e em inglês (`red`). Há ainda um terceiro nível, **verde**, que existe na matriz real (28 de 185 riscos) e no código, mas não consta da definição de criticidade pedida (vermelho/amarelo). A matriz real tem os dois e o relatório conta verdes; falta decidir se verde é criticidade ou "sem criticidade".
+- **Criticidade** aparece como `criticidade_sugerida` (arquivo da matriz lido por `load_risk_matrix`), `cor` (`minuta_rules.py`) e `severity` (relatório), com valores em português (`vermelho`) e em inglês (`red`). Há ainda um terceiro nível, **verde**, presente no código (`DEFAULT_RISCOS`, risco R-05; o relatório conta verdes), mas fora da definição de criticidade pedida (vermelho/amarelo). Falta decidir se verde é criticidade ou "sem criticidade".
 - **Rebaixamento**: um risco vermelho sem norma de fundamento sai amarelo (`rebaixados_sem_norma`). A criticidade final do alerta pode então diferir da criticidade da matriz.
 - **"tipo"**: `tipo` (estado do grafo), `minuta_type` (envelope) e a escolha `nao_suportado` na classificação. O conceito é **tipo de minuta**; `nao_suportado` é um valor de resposta, não um tipo.
-- **Norma**: o código fala em `dispositivo` (pergunta ao Jev), `citacao` (identificador), `normas` (lista) e `legal_basis`/`fundamento` (relatório). Além disso, a matriz real (`levantamento/matriz-riscos.jsonl`) guarda cada norma como `{"norma", "artigo", ...}`, enquanto `load_risk_matrix` espera `{"id"?, "citacao"}` e descarta quem não tem `citacao`. Pelo arquivo atual, isso deixaria todas as normas de fora e rebaixaria todo vermelho. Registrado como leia-lab-vz3.
-- **Temas**: o padrão embutido (`DEFAULT_TEMAS`, 6 temas) não coincide com os 33 temas da matriz real, e um dos nomes (`obrigo_e_encargos`) parece truncado de "obrigações e encargos".
-- **"trilha"**: o texto do README e este glossário usam *trilha*; no código é `trilha` (lista interna) dentro de `diagnostics`/`diag` com chave `clausulas`.
+- **Norma**: o código fala em `dispositivo` (pergunta ao Jev), `citacao` (identificador), `normas` (lista) e `legal_basis`/`fundamento` (relatório). Além disso, o formato de norma que `load_risk_matrix` aceita é `{"id"?, "citacao"}` e quem não tem `citacao` é descartado; a matriz local não versionada (`leia-kb-legislacao/`) parece guardar normas como `{"norma", "artigo"}`, o que deixaria todas as normas de fora e rebaixaria todo vermelho (a confirmar; registrado como leia-lab-vz3).
+- **Temas**: um dos nomes do padrão embutido (`DEFAULT_TEMAS`, 6 temas) parece truncado: `obrigo_e_encargos`, de "obrigações e encargos". A matriz local não versionada tem muito mais temas que o padrão embutido.
+- **"trilha"**: este glossário usa *trilha*; no código é `trilha` (lista interna) dentro de `diagnostics`/`diag` com chave `clausulas`.
 - **"alerta"**: `alertas` (campo da resposta do redator, ainda não validado) e `alerts` (envelope, já validado) são coisas diferentes com o mesmo nome. Só o segundo é um alerta no sentido deste glossário.
