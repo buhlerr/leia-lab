@@ -168,14 +168,14 @@ Protótipos descartáveis, fora do caminho principal (Q10). Usar o mesmo conjunt
 
 - Leitura de páginas oficiais em 2026-11-15; Context7 (via Composio) para documentação de bibliotecas, páginas web para preços/licenças. Alguns links redirecionaram (`ai.pydantic.dev` → `pydantic.dev/docs/ai`, `docs.directus.io` → `directus.com/docs`).
 - Sem teste prático: tudo é documentação, nenhum comportamento foi executado. Valores em dólar são preço de lista.
-- `.delegateignore` não está em `master` (só no ramo do acornworm, publicado em `45b6d19`), então não houve delegação ao Command Code; o mapeamento de código foi feito diretamente.
+- `.delegateignore` não estava em `master` quando a pesquisa começou (só no ramo do acornworm, publicado em `45b6d19`), então não houve delegação ao Command Code; o mapeamento de código foi feito diretamente. **Isso deixou de valer:** o arquivo entrou em `master` pelo PR #5 depois (ver seção 9).
 - Candidato trocado: **nenhum**. O par Directus foi avaliado junto ao Langfuse por serem complementares (um cobre domínio, o outro, LLM-ops).
 
 ## 9. Adendo B2b: camada de gestão dos dados de domínio (leia-lab-1g1.8)
 
-Pedido do usuário: nenhum framework de LLM gerencia os dados de domínio (matriz de riscos, temas, tipos de minuta, base normativa) e só o Directus tinha sido avaliado nessa categoria. Esta seção compara ferramentas de gestão e atualiza a recomendação, agora como **combinações** motor + rastreio + gestão. Leitura de páginas oficiais em 2026-11-15; mesma convenção **[F]/[I]/[R]** do cabeçalho. Sem delegação ao Command Code: o `.delegateignore` ainda não está em `master`.
+Pedido do usuário: nenhum framework de LLM gerencia os dados de domínio (matriz de riscos, temas, tipos de minuta, base normativa) e só o Directus tinha sido avaliado nessa categoria. Esta seção compara ferramentas de gestão e atualiza a recomendação, agora como **combinações** motor + rastreio + gestão. Leitura de páginas oficiais em 2026-11-15; mesma convenção **[F]/[I]/[R]** do cabeçalho. Não houve delegação ao Command Code: a leitura de páginas foi feita por leitores de página comuns e a análise é minha. (O `.delegateignore` entrou em `master` pelo PR #5 durante esta tarefa; ao iniciar a pesquisa ele ainda não estava lá.)
 
-Critérios: (a) CRUD por não desenvolvedores com papéis/login; (b) **histórico/versionamento das linhas de domínio** (para uma análise registrar qual versão da matriz decidiu; liga ao Q8, e importa se o histórico é imutável ou editável por admin); (c) funciona direto sobre as tabelas Postgres existentes, com relações e colunas vector/array; (d) licença e custo; (e) esforço de self-host; (f) encaixe com a stack Python e carga de manutenção.
+Critérios: (a) CRUD por não desenvolvedores com papéis/login; (b) **histórico/versionamento das linhas de domínio** (para uma análise registrar qual versão da matriz decidiu; liga ao Q8, e importa se o histórico é imutável ou editável por admin); (c) funciona direto sobre tabelas Postgres, com relações e colunas vector/array. **Hoje só `kb_docs` e `kb_chunks` existem no esquema de `master`**; matriz, temas, tipos e prompts ainda **não são tabelas** (ver 9.2.1), então este critério vale agora só para a base normativa e, para o resto, para o esquema que os protótipos vão criar; (d) licença e custo; (e) esforço de self-host; (f) encaixe com a stack Python e carga de manutenção.
 
 ### 9.1 Conclusão principal sobre versionamento (critério b)
 
@@ -199,7 +199,7 @@ Legenda: ● atende / ◐ parcial ou com ressalva / ○ não atende ou não enco
 |---|---|---|---|---|---|---|
 | (a) CRUD por não devs + papéis | ● políticas por coleção/campo | ◐ permissões add/change/delete/view **por modelo**, grupos; por campo exige código | ◐ papéis Owner/Creator/Editor/Commenter/Viewer; por campo só plano Business | ◐ telas **construídas à mão**; papéis customizados no Business | ◐ telas à mão; grupos; RLS só Enterprise | ◐ telas geradas das tabelas buscadas, ajustadas à mão |
 | (b) histórico das linhas | ◐ revisões (dados + *delta*) só via plataforma; admin pode purgar | ◐ histórico com *diff* e usuário; só via ORM; editabilidade não confirmada | ◐ histórico por registro somente leitura; retenção por plano | ○ só eventos de auditoria (Business) | ○ só eventos de auditoria (Team) | ○ auditoria de linhas não suportada por padrão |
-| (c) tabelas existentes, vector/array | ◐ introspecção; tipos desconhecidos **não documentado** | ◐ `inspectdb` gera modelos não gerenciados; tipo desconhecido vira `TextField` ("palpite"); `VectorField` via pgvector-python | ◐ conecta PG externo; flags de edição de dados/esquema; tipos **não encontrado** | ○ não encontrado | ○ não encontrado | ◐ "Fetch tables"; mapeamento de tipos **não encontrado**; relações só internas ao Budibase |
+| (c) tabelas Postgres (hoje só `kb_docs`/`kb_chunks`), vector/array | ◐ introspecção; tipos desconhecidos **não documentado** | ◐ `inspectdb` gera modelos não gerenciados; tipo desconhecido vira `TextField` ("palpite"); `VectorField` via pgvector-python | ◐ conecta PG externo; flags de edição de dados/esquema; tipos **não encontrado** | ○ não encontrado | ○ não encontrado | ◐ "Fetch tables"; mapeamento de tipos **não encontrado**; relações só internas ao Budibase |
 | (d) licença / custo | MSCL (fonte disponível; grátis < US$ 5 mi e < 50 pessoas); Cloud a partir de US$ 89/mês | BSD (Django e simple-history); sem custo | Sustainable Use License (uso interno OK); Comunidade grátis; Cloud Business US$ 24/assento (Plus **não** aceita banco externo) | Apache-2.0; Business US$ 15/usuário (até 99) | **AGPLv3**; Team US$ 199/construtor | GPLv3 geral, BSL em `/packages/pro`; Cloud a partir de US$ 299/mês |
 | (e) self-host | Docker; tabelas `directus_*` **no mesmo banco** | Aplicação Django + tabelas próprias de auth/admin/histórico | 2 vCPU/2 GB mín.; banco de metadados próprio | Docker/K8s; mínimos não encontrados | Postgres 16 + Redis 7, x86 | CouchDB interno |
 | (f) Python / manutenção | JS/Node; config majoritariamente sem código; Flows chamam HTTP | **Python**; ModelAdmin é código a manter, mas pequeno | JS; sem código | JS | JS | JS |
@@ -217,8 +217,14 @@ Legenda: ● atende / ◐ parcial ou com ressalva / ○ não atende ou não enco
 
 - **Appsmith, ToolJet e Budibase não entram nos protótipos.** Todos exigem montar cada tela, nenhum tem histórico de linhas, e ToolJet (AGPL, US$ 199/construtor) e Budibase (CouchDB + licença mista) têm custo/licença menos favoráveis. Se algum for reconsiderado, Appsmith (Apache-2.0, US$ 15/usuário) é o melhor dos três.
 - **NocoDB fica como reserva:** licença de fonte disponível, plano Plus não conecta banco externo, tratamento de tipos desconhecido; o histórico somente leitura é um ponto a favor.
-- Colunas `vector`/`tsvector`: nenhuma documentação cobre. Mitigação: as ferramentas só precisam das tabelas de matriz, temas, tipos, relatórios/prompts e `kb_docs`; para `kb_chunks`, expor somente leitura **sem a coluna `embedding`**.
+- Colunas `vector`/`tsvector`: nenhuma documentação cobre. Mitigação: as ferramentas só precisam das tabelas de matriz, temas, tipos, relatórios/prompts (a criar, ver 9.2.1) e de `kb_docs` (existente); para `kb_chunks`, expor somente leitura **sem a coluna `embedding`**.
 - Não troquei candidatos: as seis ferramentas do pedido foram avaliadas e a evidência já separa Directus e Django Admin como as duas melhores.
+
+### 9.2.1 Premissa corrigida: as tabelas de domínio ainda não existem
+
+**[F, código de `master` em `c57df53`]** `src/db/schema.sql` cria só `kb_docs` e `kb_chunks`. A matriz de riscos vem de um JSONL fora do git ou do padrão embutido (`load_risk_matrix`, `DEFAULT_RISCOS`); temas e mapa de temas são constantes (`DEFAULT_TEMAS`, `DEFAULT_TEMA_MAP`); o tipo está fixo em `_Q_TIPO` e o prompt de redação em `SISTEMA_REDIGIR` (`src/graphs/analyze_minuta_graph.py`, `src/graphs/minuta_rules.py`). `minuta_types` e `minuta_reports` existem só no acornworm, cujo motor não é usado em C1/C2, e matriz/temas não são tabela em nenhum dos dois ramos. O ADR-0001 lista a falta de versionamento da matriz como ponto em aberto e exige matriz **por tipo de minuta** (Q6).
+
+**Consequência [I]:** ao longo desta seção, "tabelas de matriz/temas/tipos/prompts" significam o esquema **a criar**, não tabelas existentes. Todo protótipo (C1 e C2) precisa, antes de testar a ferramenta de gestão: (1) desenhar o esquema (tipo de minuta → matriz de riscos → riscos → temas/mapa de temas → relatórios/prompts, com a matriz ligada ao tipo); (2) carregar a matriz atual (JSONL ou padrão embutido) nesse esquema; (3) fazer o grafo ler a configuração do banco em vez do JSONL/constantes (`_Q_TIPO` e `SISTEMA_REDIGIR` também). Esse trabalho pesa na medida de reescrita e de horas, e **reduz a vantagem de "menor reescrita" do C1** (o grafo muda tanto em C1 quanto em C2). As ferramentas de gestão diferem pouco nesse passo, que é comum.
 
 ### 9.3 Categoria 2: gestão da base normativa (leis e jurisprudência)
 
@@ -259,7 +265,7 @@ O painel de gestão e o rastreio são **independentes do motor** (dados em Postg
 
 | # | Combinação | Por que | Principais riscos |
 |---|---|---|---|
-| **1 (prototipar C1)** | **LangGraph + LangSmith + Django Admin** (com histórico por gatilho + snapshot por análise) | Menor reescrita; tudo em Python; BSD, sem limite de faturamento; `inspectdb` + `ModelAdmin` pequenos; `diff_against` dá comparação de versões; Studio/Prompt Hub/datasets da LangSmith; ação de reindexar em Python | Admin é código a manter; permissões por modelo, não por campo; UI datada; LangSmith: SaaS (self-host só Enterprise), preço por traço não encontrado |
+| **1 (prototipar C1)** | **LangGraph + LangSmith + Django Admin** (com histórico por gatilho + snapshot por análise) | Menor reescrita do **motor** (o grafo ainda precisa passar a ler a configuração do banco, igual em C2, ver 9.2.1); tudo em Python; BSD, sem limite de faturamento; `inspectdb` + `ModelAdmin` pequenos; `diff_against` dá comparação de versões; Studio/Prompt Hub/datasets da LangSmith; ação de reindexar em Python | Admin é código a manter; permissões por modelo, não por campo; UI datada; LangSmith: SaaS (self-host só Enterprise), preço por traço não encontrado |
 | **2 (prototipar C2)** | **LangGraph + Langfuse + Directus** | Gestão por configuração (papéis por campo, revisões com *delta*, Flows com webhook para reindexar); Langfuse MIT, pode ser hospedado por nós, filas de anotação ilimitadas no self-host | Licença MSCL (elegibilidade a confirmar); revisões purgáveis por admin; `vector`/arrays não documentados; Langfuse self-host pesado (ClickHouse + Redis + S3); Cloud Core limita 25 coleções |
 | 3 (não prototipar; sai do cruzamento) | LangGraph + Langfuse + Django Admin | Combina licenças abertas (MIT + BSD) | Mesmos riscos do Django; resultado inferível dos protótipos 1 e 2 |
 | 4 | LangGraph + LangSmith + NocoDB | Histórico por registro somente leitura | Licença de fonte disponível; Plus não conecta banco externo; tipos desconhecidos; retenção por plano |
@@ -271,9 +277,10 @@ O painel de gestão e o rastreio são **independentes do motor** (dados em Postg
 ### 9.7 O que cada protótipo deve demonstrar (atualiza a seção 6)
 
 **Comum a C1 e C2**
+0. **Passo prévio: criar o esquema de domínio (não existe hoje, ver 9.2.1)**: tipo de minuta → matriz por tipo → riscos/temas/mapa de temas → relatórios/prompts; carregar a matriz atual (JSONL ou `DEFAULT_RISCOS`) e fazer o grafo ler do banco (inclusive `_Q_TIPO` e `SISTEMA_REDIGIR`). Registrar as horas desse passo separadamente, para não misturá-las com o custo de cada ferramenta de gestão.
 1. **Versionamento do Q8**: uma análise antiga continua mostrando a matriz/prompt que a decidiu depois de a matriz mudar (snapshot por análise), e o histórico oficial vem do gatilho *append-only*. Provar também uma escrita direta por `psql` (a ferramenta de gestão **não** a vê, o gatilho sim) e uma tentativa de apagar/editar histórico por um admin da ferramenta.
 2. **Edição por não dev**: alguém sem acesso a código muda um risco, um tema e um prompt de relatório, e a **próxima** análise usa a nova versão, sem implantação.
-3. **Tabelas existentes**: a ferramenta lê/edita matriz, temas, tipos, relatórios e `kb_docs` sem mover dados; mostrar o que acontece com `kb_chunks` (colunas `vector`, `tsvector`) e confirmar que só se expõe sem `embedding`.
+3. **Ferramenta sobre o esquema do item 0 e sobre `kb_docs` existente**: a ferramenta lê/edita matriz, temas, tipos e relatórios (criados no item 0) e `kb_docs`, sem mover dados; mostrar o que acontece com `kb_chunks` (colunas `vector`, `tsvector`) e confirmar que só se expõe sem `embedding`.
 4. **Base normativa**: lista de documentos, inspeção de chunks (somente leitura), envio de arquivo e **reindexação acionada pela ferramenta** chamando o `ingest_graph`.
 5. Os itens "Comum aos dois" da seção 6 (trilha reconstruível, nenhum texto cru fora do processo incluindo checkpoints, gold set, tipo de minuta como dado).
 
@@ -289,7 +296,7 @@ O painel de gestão e o rastreio são **independentes do motor** (dados em Postg
 - Flow com webhook (ação não bloqueante) que dispara a reindexação; limite de coleções/Flows do plano Cloud; confirmar elegibilidade à MSCL.
 - Langfuse: prompt editado na UI, experimento via UI sobre o gold set, fila de anotação com revisor; unidades por análise; esforço de operar PostgreSQL + ClickHouse + Redis + S3.
 
-**Critérios de saída:** os da seção 6 (trilha reconstruível, não-dev edita sem ajuda, gold set comparando versões, horas de reescrita, custo mensal) mais: (f) **versão da matriz recuperável por análise após edição e após escrita por fora da ferramenta**; (g) horas para entregar a tela de gestão.
+**Critérios de saída:** os da seção 6 (trilha reconstruível, não-dev edita sem ajuda, gold set comparando versões, horas de reescrita, custo mensal) mais: (f) **versão da matriz recuperável por análise após edição e após escrita por fora da ferramenta**; (g) horas para entregar a tela de gestão, **separadas das horas do passo 0** (esquema de domínio e leitura do banco pelo grafo).
 
 ### 9.8 Lacunas e perguntas abertas deste adendo
 
