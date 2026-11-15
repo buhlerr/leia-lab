@@ -84,3 +84,30 @@ def test_validate_and_format_replaces_non_literal_excerpt_and_downgrades_red_wit
     assert env["content"]["ajustes_validacao"]["rebaixados_sem_norma"] == 1
     assert "[AMARELO] Reajuste semestral proibido" in report_md
     assert diag["funil"] == {"yellow": 1}
+
+
+def test_validate_and_format_unsupported_returns_empty_alerts():
+    _, env, diag = validate_and_format({"filename": "x.txt", "tipo": "nao_suportado", "suportado": False})
+    assert env["status"] == "unsupported"
+    assert env["content"] == {"alerts": []}
+    assert diag["funil"] == {}
+
+
+def test_load_risk_matrix_falls_back_to_defaults_and_reads_jsonl(tmp_path):
+    import json
+
+    from src.graphs.minuta_rules import DEFAULT_TEMAS, load_risk_matrix
+
+    temas, riscos, tema_map = load_risk_matrix(tmp_path / "missing.jsonl")
+    assert temas == DEFAULT_TEMAS and "reajuste_e_indexacao" in riscos and tema_map
+
+    p = tmp_path / "m.jsonl"
+    p.write_text(
+        json.dumps({"id": "X-1", "tema": "t1", "risco": "r", "criticidade_sugerida": "amarelo",
+                    "parte_prejudicada": "locador", "normas": [{"id": "n1", "citacao": "Lei X, art. 1"}]})
+        + "\n",
+        encoding="utf-8",
+    )
+    temas, riscos, tema_map = load_risk_matrix(p)
+    assert temas == ["t1"] and riscos["t1"][0]["normas"][0]["citacao"] == "Lei X, art. 1"
+    assert tema_map == {"t1": ["n1"]}

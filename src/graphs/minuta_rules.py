@@ -89,6 +89,7 @@ DEFAULT_TEMAS: list[str] = [
     "reajuste_e_indexacao",
 ]
 
+# Fallback mínimo embutido; a matriz real (ainda não validada por advogado) vem de load_risk_matrix.
 DEFAULT_RISCOS: dict[str, list[dict[str, Any]]] = {
     "reajuste_e_indexacao": [
         {
