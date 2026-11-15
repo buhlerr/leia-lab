@@ -61,9 +61,10 @@ async def load_rules_snapshot(pool: asyncpg.Pool) -> RulesSnapshot:
     theme_slug = {t["id"]: t["slug"] for t in themes}
     for ty in types:
         mine = [t for t in themes if t["minuta_type_id"] == ty["id"]]
+        mine_ids = {t["id"] for t in mine}
         riscos: dict[str, list[dict[str, Any]]] = {}
         for r in risks:
-            if r["theme_id"] in {t["id"] for t in mine}:
+            if r["theme_id"] in mine_ids:
                 riscos.setdefault(theme_slug[r["theme_id"]], []).append(
                     {
                         "id": r["risk_id"],

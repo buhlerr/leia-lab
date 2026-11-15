@@ -14,3 +14,6 @@ __pycache__/
 
 # planning-with-files working plans (per-bead)
 .planning/
+
+# local gold-run outputs (analysis ids only)
+.local/
