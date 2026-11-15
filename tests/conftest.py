@@ -7,23 +7,35 @@ nunca apague o corpus que voce indexou a mao. Cada teste comeca com o schema
 
 from __future__ import annotations
 
-import os
 from urllib.parse import urlsplit, urlunsplit
 
 import asyncpg
 import pytest
 
 from src.config import Settings
+from tests._db_guard import SuiteSettings, UnsafeTestDatabaseError, assert_safe_test_database
 
-TEST_DATABASE_URL = os.environ.get(
-    "TEST_DATABASE_URL",
-    "postgresql://leia:leia_lab_2026@localhost:5433/leia_lab_test",
-)
+_SUITE_SETTINGS = SuiteSettings()
+TEST_DATABASE_URL = _SUITE_SETTINGS.TEST_DATABASE_URL
 
 
 def _server_url(dsn: str, database: str) -> str:
     parts = urlsplit(dsn)
     return urlunsplit((parts.scheme, parts.netloc, f"/{database}", "", ""))
+
+
+def require_safe_test_database(test_dsn: str | None = None, dev_dsn: str | None = None) -> None:
+    """Aborta a sessao do pytest se o banco de teste nao for descartavel.
+
+    Usa ``pytest.exit`` (e nao ``skip``/``fail``) para que nenhum teste seguinte
+    chegue ao ``DROP SCHEMA public CASCADE`` do fixture ``pool``.
+    """
+    test_dsn = test_dsn if test_dsn is not None else TEST_DATABASE_URL
+    dev_dsn = dev_dsn if dev_dsn is not None else _SUITE_SETTINGS.DATABASE_URL
+    try:
+        assert_safe_test_database(test_dsn, dev_dsn)
+    except UnsafeTestDatabaseError as exc:
+        pytest.exit(str(exc), returncode=pytest.ExitCode.USAGE_ERROR)
 
 
 async def _ensure_test_database() -> None:
@@ -41,6 +53,7 @@ async def _ensure_test_database() -> None:
 @pytest.fixture
 async def pool():
     """Pool para um banco de teste com o schema `public` vazio."""
+    require_safe_test_database()
     await _ensure_test_database()
     created = await asyncpg.create_pool(dsn=TEST_DATABASE_URL, min_size=1, max_size=4)
     assert created is not None
