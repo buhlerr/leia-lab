@@ -26,16 +26,17 @@ def setup_tracing(tool: str) -> str | None:
         project = os.environ.get("LANGSMITH_PROJECT")
         return f"langsmith: tracing on (project={project or '(default)'})"
     if tool == "langfuse":
-        host = os.environ.get("LANGFUSE_HOST", "https://cloud.langfuse.com").rstrip("/")
+        host = os.environ.get("LANGFUSE_HOST", "https://us.cloud.langfuse.com").rstrip("/")
         pk = os.environ.get("LANGFUSE_PUBLIC_KEY", "")
         sk = os.environ.get("LANGFUSE_SECRET_KEY", "")
         if not (pk and sk):
             raise RuntimeError("LANGFUSE_PUBLIC_KEY/LANGFUSE_SECRET_KEY ausentes (variáveis de usuário)")
+        # O OTLPSpanExporter usa o endpoint como veio: caminho completo obrigatorio.
         endpoint = f"{host}/api/public/otel/v1/traces"
         auth = base64.b64encode(f"{pk}:{sk}".encode()).decode()
         return _otel(endpoint, {"Authorization": f"Basic {auth}"}, f"langfuse -> {host}")
     if tool == "phoenix":
-        base = os.environ.get("PHOENIX_ENDPOINT", "http://192.168.0.120:4318").rstrip("/")
+        base = os.environ.get("PHOENIX_ENDPOINT", "http://192.168.0.120:6006").rstrip("/")
         return _otel(f"{base}/v1/traces", None, f"phoenix -> {base}")
     raise ValueError(f"ferramenta de tracing desconhecida: {tool!r}")
 
@@ -48,14 +49,32 @@ def _otel(endpoint: str, headers: dict[str, str] | None, label: str) -> str:
     from opentelemetry.sdk.trace import TracerProvider
     from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
+    if _PROVIDER is not None:  # reconfiguração: descarta o provider anterior
+        _PROVIDER.shutdown()
+        _PROVIDER = None
+
     provider = TracerProvider(resource=Resource.create({"service.name": "leia-analyze"}))
     provider.add_span_processor(
-        BatchSpanProcessor(OTLPSpanExporter(endpoint=endpoint, headers=headers))
+        BatchSpanProcessor(
+            OTLPSpanExporter(endpoint=endpoint, headers=headers, timeout=60),
+            export_timeout_millis=120000,
+        )
     )
+    # A API global do OTel só aceita o PRIMEIRO provider; reconfigurar exige limpá-la.
+    try:
+        from opentelemetry.util._once import Once
+
+        ot_trace._TRACER_PROVIDER = None  # type: ignore[attr-defined]
+        ot_trace._TRACER_PROVIDER_SET_ONCE = Once()  # type: ignore[attr-defined]
+    except Exception:  # pragma: no cover - versões futuras do SDK
+        pass
     ot_trace.set_tracer_provider(provider)
     from openinference.instrumentation.langchain import LangChainInstrumentor
 
-    LangChainInstrumentor().instrument()
+    instrumentor = LangChainInstrumentor()
+    if instrumentor.is_instrumented_by_opentelemetry:  # reconfiguração: religa ao novo provider
+        instrumentor.uninstrument()
+    instrumentor.instrument()
     _PROVIDER = provider
     return label
 
@@ -64,3 +83,11 @@ def force_flush(timeout_millis: int = 30000) -> None:
     """Exporta spans pendentes (testes e encerramento)."""
     if _PROVIDER is not None:
         _PROVIDER.force_flush(timeout_millis)
+
+
+def shutdown() -> None:
+    """Fecha o provider atual (fim de teste / encerramento limpo)."""
+    global _PROVIDER
+    if _PROVIDER is not None:
+        _PROVIDER.shutdown()
+        _PROVIDER = None

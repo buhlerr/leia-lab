@@ -69,6 +69,10 @@ async def _main(args: argparse.Namespace) -> None:
                 print(f"  {cid}: expected={ch['expected']} {ch['from']} -> {ch['to']}")
     finally:
         await pool.close()
+        if getattr(args, "trace", "off") != "off":
+            from src.tracing import force_flush
+
+            force_flush()
 
 
 def main() -> None:

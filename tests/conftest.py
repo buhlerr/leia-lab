@@ -13,6 +13,7 @@ import asyncpg
 import pytest
 
 from src.config import Settings
+from tests._capture import capture  # noqa: F401  (fixture de captura de telemetria)
 from tests._db_guard import SuiteSettings, UnsafeTestDatabaseError, assert_safe_test_database
 
 _SUITE_SETTINGS = SuiteSettings()
