@@ -1,0 +1,39 @@
+# .delegateignore - paths the agent-delegate plugin must never send to the sandbox.
+#
+# The plugin snapshots every file that is not in .gitignore and uploads it to a
+# remote sandbox, where a third-party model provider (Command Code) reads it.
+# Anything below could hold client minutas, legal-case data or credentials.
+#
+# Syntax: one git glob pathspec per line, relative to the repo root; "#" starts
+# a comment. "dir/**" excludes everything under dir. A bare name matches only
+# at the repo root; use "**/name" to match at any depth.
+#
+# Note: the plugin already excludes .env*, *.pem, *.key and similar secret names
+# at any depth. They are repeated here so this file stands on its own.
+
+# --- Client / case data: never leaves this machine ---
+leia-minutas-teste-mascaradas/**
+minutas/**
+data/**
+
+# --- Legislation KB scratch folder (holds cf_account.txt and raw sources) ---
+leia-kb-legislacao/**
+**/cf_account*
+
+# --- Untracked local projects and tooling in the main checkout ---
+mcp-pangolin/**
+firefish/**
+.great_cto/**
+CONTEXT.md
+project.yaml
+
+# --- Nested worktrees (also listed in .git/info/exclude) ---
+acornworm/**
+scorpionfish/**
+
+# --- Secrets and local state ---
+.env*
+**/.env*
+.planning/**
+.beads/**
+.repo-atlas/**
