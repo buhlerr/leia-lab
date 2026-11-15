@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = ""
     CHAT_MODEL: str = "openai/gpt-4o-mini"
     EMBEDDING_MODEL: str = "openai/text-embedding-3-small"
+    TYPESAFE_API_KEY: str = ""
+    TYPESAFE_BASE_URL: str = "https://api.typesafe.ai/v1/systemone"
+    JEV_MODEL: str = "jev-1.14.0"
 
     model_config = SettingsConfigDict(
         env_file=".env",
