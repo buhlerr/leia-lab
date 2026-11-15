@@ -23,10 +23,10 @@ from src.agent.pipeline import (
 )
 from src.config import Settings
 from src.db.config_repo import list_minuta_types
-from src.db.connection import init_db
 from src.ingest.extract import DocumentError
 from src.ingest.isolated import extract_text_isolated
 from src.ui.render import render_safe_html
+from src.ui.runtime import ensure_schema, with_pool
 
 
 def can_submit(has_api_key: bool, consent: bool) -> bool:
@@ -110,28 +110,6 @@ def _render_result(result: AnalysisResult) -> None:
         _render_report(report)
 
 
-async def _apply_schema(settings) -> None:
-    """Aplica o schema em um pool proprio, fechado em seguida."""
-    async with asyncpg.create_pool(
-        dsn=settings.DATABASE_URL, min_size=1, max_size=2
-    ) as pool:
-        await init_db(pool)
-
-
-@st.cache_resource(show_spinner=False)
-def _ensure_schema(dsn: str) -> bool:
-    """Aplica o schema uma vez por processo; falhas nao ficam no cache."""
-    asyncio.run(_apply_schema(Settings(DATABASE_URL=dsn)))
-    return True
-
-
-async def _with_pool(settings, work):
-    async with asyncpg.create_pool(
-        dsn=settings.DATABASE_URL, min_size=1, max_size=4
-    ) as pool:
-        return await work(pool)
-
-
 def main() -> None:
     st.title("Analise de minutas")
 
@@ -162,9 +140,9 @@ def main() -> None:
         )
 
     try:
-        _ensure_schema(settings.DATABASE_URL)
+        ensure_schema(settings.DATABASE_URL)
         types = asyncio.run(
-            _with_pool(settings, lambda pool: list_minuta_types(pool))
+            with_pool(settings, lambda pool: list_minuta_types(pool))
         )
     except (OSError, asyncpg.PostgresError, asyncpg.InterfaceError) as exc:
         st.error(
@@ -201,7 +179,7 @@ def main() -> None:
             try:
                 text = extract_text_isolated(uploaded_file.name, uploaded_file.getvalue())
                 result = asyncio.run(
-                    _with_pool(
+                    with_pool(
                         settings,
                         lambda pool: run_analysis(pool, text, settings, type_id),
                     )
