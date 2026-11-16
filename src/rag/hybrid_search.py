@@ -115,6 +115,13 @@ async def hybrid_search_rrf(
     existed) have unknown provenance and are deliberately NOT ranked by the dense
     branch; they stay reachable through the sparse branch only until reindexed.
 
+    The dense scan runs in a transaction with ``hnsw.iterative_scan`` set to
+    ``relaxed_order`` (pgvector 0.8+). HNSW applies the model filter after the
+    graph scan, so in a mixed-model corpus a single scan of ``ef_search`` nodes
+    can return fewer than ``candidate_limit`` rows of the query model. The
+    iterative scan keeps walking the graph until enough filtered rows exist.
+    Older pgvector ignores the setting, and a single-model corpus is unaffected.
+
     Each returned dict has ``id``, ``doc_id``, ``title``, ``content`` and
     ``score`` keys, ordered by descending ``score``.
     """
@@ -129,15 +136,17 @@ async def hybrid_search_rrf(
 
     candidate_limit = max(top_k * CANDIDATE_MULTIPLIER, MIN_CANDIDATES)
 
-    rows = await pool.fetch(
-        HYBRID_SEARCH_SQL,
-        query_text,
-        _to_pgvector_literal(query_vector),
-        candidate_limit,
-        float(rrf_k),
-        top_k,
-        embedding_model,
-    )
+    async with pool.acquire() as conn, conn.transaction():
+        await conn.execute("SET LOCAL hnsw.iterative_scan = relaxed_order")
+        rows = await conn.fetch(
+            HYBRID_SEARCH_SQL,
+            query_text,
+            _to_pgvector_literal(query_vector),
+            candidate_limit,
+            float(rrf_k),
+            top_k,
+            embedding_model,
+        )
 
     results = [
         {
