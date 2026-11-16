@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beads pendentes e decisão do Risco 3 (LGPD)</title>
+<style>
+  :root {
+    --paper: #f5f4f0;
+    --card: #fffdf9;
+    --ink: #1d1c1a;
+    --muted: #6b675f;
+    --line: #ded8cc;
+    --red: #b42318;
+    --red-soft: #fdecea;
+    --green: #067647;
+    --green-soft: #e7f6ee;
+    --blue: #175cd3;
+    --blue-soft: #eaf1fd;
+    --amber: #b54708;
+    --amber-soft: #fff4e5;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --serif: "Iowan Old Style", "Palatino Linotype", Georgia, "Times New Roman", serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--sans); line-height: 1.6; font-size: 16px; }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 24px 72px; }
+  header { background: linear-gradient(180deg, #17211f 0%, #1f2d2a 100%); color: #f5f4f0; padding: 56px 0 44px; border-bottom: 4px solid #0f766e; }
+  header .wrap { padding-bottom: 0; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #b9c6c2; margin: 0 0 14px; }
+  h1 { font-family: var(--serif); font-weight: 600; font-size: clamp(30px, 5vw, 46px); line-height: 1.1; margin: 0 0 16px; letter-spacing: -.01em; }
+  .lede { font-size: 18px; color: #d7e0dd; max-width: 800px; margin: 0 0 26px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { font-family: var(--mono); font-size: 12px; padding: 6px 10px; border: 1px solid #3f524d; border-radius: 999px; color: #f5f4f0; background: #25332f; }
+  .chip.green { border-color: #1f5c40; background: #173a2b; color: #9be3bd; }
+  .chip.blue { border-color: #244a8a; background: #172a4a; color: #b6d0ff; }
+  .chip.amber { border-color: #7c4d12; background: #3b260c; color: #ffd9a8; }
+  main { padding-top: 44px; }
+  section { margin: 0 0 44px; }
+  h2 { font-family: var(--serif); font-weight: 600; font-size: 26px; margin: 0 0 6px; letter-spacing: -.005em; }
+  .sub { color: var(--muted); margin: 0 0 20px; max-width: 820px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; box-shadow: 0 1px 0 rgba(29,28,26,.03); }
+  .grid { display: grid; gap: 16px; }
+  .grid.two { grid-template-columns: repeat(2, 1fr); }
+  .grid.three { grid-template-columns: repeat(3, 1fr); }
+  .grid.four { grid-template-columns: repeat(4, 1fr); }
+  @media (max-width: 900px) { .grid.two, .grid.three, .grid.four { grid-template-columns: 1fr; } }
+  .verdict { border-left: 4px solid var(--line); }
+  .verdict.green { border-left-color: var(--green); }
+  .verdict.blue { border-left-color: var(--blue); }
+  .verdict.amber { border-left-color: var(--amber); }
+  .verdict.red { border-left-color: var(--red); }
+  .verdict h3 { margin: 0 0 6px; font-size: 17px; }
+  .verdict .id { font-family: var(--mono); font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+  .verdict p { margin: 8px 0 0; font-size: 14.5px; }
+  .tag { display: inline-block; font-family: var(--mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; padding: 3px 8px; border-radius: 5px; margin-top: 12px; }
+  .tag.green { background: var(--green-soft); color: var(--green); }
+  .tag.blue { background: var(--blue-soft); color: var(--blue); }
+  .tag.amber { background: var(--amber-soft); color: var(--amber); }
+  .tag.red { background: var(--red-soft); color: var(--red); }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); background: #f1ede4; }
+  tr:last-child td { border-bottom: none; }
+  code, .mono { font-family: var(--mono); font-size: .92em; }
+  code { background: #ece7dc; padding: 1px 5px; border-radius: 4px; }
+  pre { background: #17211f; color: #e9e4d9; padding: 18px 20px; border-radius: 12px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.65; margin: 0; }
+  pre .ok { color: #9be3bd; }
+  pre .dim { color: #9a9488; }
+  pre .amber { color: #ffd9a8; }
+  .callout { border: 1px solid #c9d7f0; background: var(--blue-soft); border-radius: 12px; padding: 14px 16px; font-size: 14.5px; color: #123b7a; }
+  .callout.warn { border-color: #f0d3a8; background: var(--amber-soft); color: #6b3b06; }
+  .callout.ok { border-color: #a9dec0; background: var(--green-soft); color: #055835; }
+  .metric { font-family: var(--serif); font-size: 30px; font-weight: 600; line-height: 1.1; margin: 4px 0; }
+  .metric-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 0; }
+  .small { font-size: 13.5px; color: var(--muted); }
+  .kicker { font-family: var(--mono); font-size: 12px; color: var(--muted); margin: 0 0 8px; text-transform: uppercase; letter-spacing: .05em; }
+  ul.clean { margin: 8px 0 0; padding-left: 18px; font-size: 14.5px; }
+  ul.clean li { margin-bottom: 6px; }
+  footer { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 22px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <p class="eyebrow">leia-lab · Beads e Governança · 2026-11-16</p>
+    <h1>Três beads criadas e opções para decidir o Risco 3</h1>
+    <p class="lede">
+      O tracker do projeto estava com 51 itens fechados e zero abertos após o PR #21.
+      Os cinco itens pendentes foram triados, o Risco 1 e o Risco 3 da ADR-0002 foram encerrados com decisão e prova real, e a fila ficou com duas beads abertas.
+    </p>
+    <div class="chips">
+      <span class="chip green">55 beads no total</span>
+      <span class="chip blue">2 abertas (1 pronta)</span>
+      <span class="chip">53 fechadas</span>
+      <span class="chip green">Risco 1 e Risco 3 resolvidos</span>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section>
+    <h2>1. O problema e o que mudou</h2>
+    <p class="sub">
+      Depois do fechamento das 51 beads da migração e do gabarito com severidade, cinco frentes permaneciam apenas em documentos ou em notas de fechamento. Sem registro aberto no tracker, a retomada por outra sessão ou agente perderia o estado real da fila.
+    </p>
+    <div class="grid four">
+      <div class="card">
+        <p class="metric-label">Antes</p>
+        <p class="metric">51 / 0</p>
+        <p class="small">51 fechadas e nenhuma aberta</p>
+      </div>
+      <div class="card">
+        <p class="metric-label">Criadas no ciclo</p>
+        <p class="metric">4</p>
+        <p class="small">etv e k34 fechadas; 7n1 e 8z6 abertas</p>
+      </div>
+      <div class="card">
+        <p class="metric-label">Já existia</p>
+        <p class="metric">4fv</p>
+        <p class="small">MLflow fechado como adiado</p>
+      </div>
+      <div class="card">
+        <p class="metric-label">Depois</p>
+        <p class="metric" style="color:var(--green)">55 / 2</p>
+        <p class="small">53 fechadas, 2 abertas e 1 pronta</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. Mapeamento completo dos cinco itens</h2>
+    <p class="sub">
+      Cada item relatado no resumo inicial foi conferido contra o banco do tracker em <code>.beads/</code> e contra as decisões registradas em <code>docs/adr/</code>.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Item original</th>
+          <th>Destino no tracker</th>
+          <th>Tipo e prioridade</th>
+          <th>Rótulos e estado</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Billing LangSmith (painel visual do Risco 1, continuação de <code>leia-lab-8tr.9</code>)</td>
+          <td><code>leia-lab-etv</code></td>
+          <td><code>task</code> · P2</td>
+          <td><code>human</code>, <code>ready-for-human</code> · fechada em 2026-11-16 (10 traços raiz no mês)</td>
+        </tr>
+        <tr>
+          <td>Integração do produto com camada FE externa</td>
+          <td><code>leia-lab-8z6</code></td>
+          <td><code>feature</code> · P3</td>
+          <td><code>enhancement</code>, <code>needs-triage</code> · aberta (depende de <code>leia-lab-7n1</code>)</td>
+        </tr>
+        <tr>
+          <td>Decisão sobre <code>acornworm</code> / <code>pydantic-ai</code></td>
+          <td><code>leia-lab-k34</code> e <code>leia-lab-7n1</code></td>
+          <td><code>decision</code> + <code>task</code> · P2/P3</td>
+          <td><code>k34</code> fechada (Opção A); <code>leia-lab-7n1</code> pronta para colher peças e arquivar</td>
+        </tr>
+        <tr>
+          <td>MLflow self-host adiado</td>
+          <td><code>leia-lab-4fv</code></td>
+          <td><code>task</code> · P3</td>
+          <td>fechada em 2026-11-16 (reabrir se LangSmith falhar em custo ou LGPD)</td>
+        </tr>
+        <tr>
+          <td>Risco 3 LGPD / residência de dados</td>
+          <td>Registrado em <code>docs/adr/0002-motor-rastreio-e-gestao.md</code></td>
+          <td>Decisão do responsável (Opção 1)</td>
+          <td>Outorga condicional aceita em 2026-11-16; reabre <code>leia-lab-4fv</code> se contrato ou controlador vedar telemetria fora do Brasil</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>3. Detalhe das decisões e beads do ciclo</h2>
+    <div class="grid three">
+      <div class="card verdict green">
+        <span class="id">leia-lab-etv · task · P2</span>
+        <h3>Billing visual da LangSmith</h3>
+        <p>
+          O export do painel Usage and Billing em <code>Workspace 1</code> (<code>8e0c5144-87dc-4aa5-902e-009b8476a8af</code>) mostrou 10 Traces no mês (3 em 13/11 e 7 em 16/11), provando cobrança por traço raiz sem contar os ~80 a 108 sub-runs por análise. Risco 1 fechado.
+        </p>
+        <span class="tag green">fechada · Risco 1 fechado</span>
+      </div>
+      <div class="card verdict blue">
+        <span class="id">leia-lab-8z6 · feature · P3</span>
+        <h3>API para camada FE externa</h3>
+        <p>
+          O responsável definiu que usuários finais não terão acesso ao Django Admin nem às camadas internas deste repositório e subirão contratos por uma camada FE separada. A bead agora cobre o contrato backend com extração isolada, mascaramento e execução de <code>build_analyze_minuta_graph</code>.
+        </p>
+        <span class="tag blue">bloqueada por leia-lab-7n1</span>
+      </div>
+      <div class="card verdict amber">
+        <span class="id">leia-lab-k34 fechada · leia-lab-7n1 pronta</span>
+        <h3>Colheita do acornworm antes de arquivar</h3>
+        <p>
+          A decisão escolheu a Opção A: colher <code>src/ingest/extract.py</code>, <code>src/ingest/isolated.py</code> e <code>src/ingest/worker.py</code> para o <code>master</code> (e confirmar se <code>src/ui/render.py</code> segue para a camada FE) antes de arquivar a branch <code>buhlerr/resume-previous-work-session</code> e o worktree <code>acornworm</code>.
+        </p>
+        <span class="tag amber">pronta em leia-lab-7n1</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. Decisão do Risco 3 (LGPD e residência de dados)</h2>
+    <p class="sub">
+      A ADR-0002 registra que nenhuma nuvem candidata de rastreio oferece região no Brasil e que as páginas oficiais da LangChain citam GDPR/DPA sem menção explícita à LGPD. Para decidir bem, importa separar o que o rastreio realmente envia do que os modelos já enviam.
+    </p>
+
+    <div class="card" style="margin-bottom:16px">
+      <p class="kicker">Fatos verificados no repositório</p>
+      <ul class="clean">
+        <li><strong>Premissa Q2 da ADR-0001.</strong> Mascarar dados pessoais com <code>mask_personal_data</code> em <code>src/ingest/masking.py</code> antes de toda chamada externa foi aceito como suficiente, inclusive com Jev/TypeSafe processando nos EUA (<code>https://api.typesafe.ai/v1/systemone</code>) e OpenRouter (<code>https://openrouter.ai/api/v1</code>).</li>
+        <li><strong>Estado atual do rastreio.</strong> O grafo em <code>master</code> não guarda <code>raw_text</code> no estado, <code>LANGSMITH_TRACING</code> fica desligado no ambiente, o rastreio roda só com <code>--trace</code> no CLI e os testes em <code>tests/test_tracing.py</code> provam que nome, CPF, RG e chaves de API não saem no payload enviado.</li>
+        <li><strong>Auditoria independente do SaaS.</strong> O registro auditável fica no Postgres local do CT 116 nas tabelas <code>analyses</code> e <code>analysis_trail</code>. A retenção curta de 14 dias na LangSmith não afeta a auditoria nem exige manutenção do traço no fornecedor.</li>
+        <li><strong>Efeito real de trocar só o rastreio.</strong> Migrar da LangSmith para MLflow self-host (<code>leia-lab-4fv</code>) tira a telemetria dos EUA, mas <strong>não</strong> zera a transferência internacional do sistema enquanto Jev/TypeSafe e OpenRouter permanecerem nos EUA. Reduz de três para dois serviços externos nos EUA e adiciona um servidor novo no CT 116 com validação pendente de <code>mlflow.langchain.autolog()</code> no grafo completo.</li>
+      </ul>
+    </div>
+
+    <div class="grid three">
+      <div class="card verdict green">
+        <span class="id">Opção 1 · Recomendada</span>
+        <h3>Outorga condicional com gatilho objetivo</h3>
+        <p>
+          Aceitar o Risco 3 para a fase atual de validação e uso interno com minutas mascaradas, mantendo a LangSmith US sob as quatro travas ativas (mascaramento prévio, zero <code>raw_text</code>, <code>--trace</code> desligado por padrão sem link público e auditoria só no Postgres).
+        </p>
+        <p>
+          <strong>Gatilho de troca.</strong> Reabrir <code>leia-lab-4fv</code> para MLflow self-host se entrar cliente externo cujo contrato ou controlador proíba suboperador de telemetria fora do Brasil.
+        </p>
+        <span class="tag green">decisão adotada em 2026-11-16</span>
+      </div>
+
+      <div class="card verdict blue">
+        <span class="id">Opção 2</span>
+        <h3>Confinar a telemetria à LAN agora</h3>
+        <p>
+          Proibir envio de traços para a LangSmith em minutas reais desde já, usar Phoenix no CT 116 para depuração pontual e reabrir <code>leia-lab-4fv</code> para implantar MLflow self-host no homelab.
+        </p>
+        <p>
+          <strong>Tradeoff.</strong> Exige manter o servidor MLflow com Postgres no CT 116 e concluir o teste de privacidade de <code>autolog</code> no grafo completo, mantendo ainda Jev e OpenRouter nos EUA.
+        </p>
+        <span class="tag blue">zero telemetria fora</span>
+      </div>
+
+      <div class="card verdict red">
+        <span class="id">Opção 3</span>
+        <h3>Restringir --trace a dados sintéticos</h3>
+        <p>
+          Manter a LangSmith no código, mas permitir <code>--trace</code> apenas sobre minutas sintéticas de teste até revisão jurídica do art. 33 da LGPD e conferência formal do DPA da LangChain.
+        </p>
+        <p>
+          <strong>Tradeoff.</strong> Evita enviar minutas reais mascaradas ao rastreador agora, mas tira a visibilidade de traços durante a calibragem real da matriz e do gabarito.
+        </p>
+        <span class="tag red">conservadora com traços reais</span>
+      </div>
+    </div>
+
+    <div class="callout ok" style="margin-top:16px">
+      <strong>Decisão registrada em 2026-11-16.</strong> O responsável aprovou a Opção 1 e a outorga condicional foi registrada na ADR-0002. Como Jev e OpenRouter já recebem texto mascarado nos EUA sob a Q2 e <code>--trace</code> só liga sob demanda no CLI, trocar a LangSmith agora não resolve residência de inferência. O gatilho para reabrir <code>leia-lab-4fv</code> fica ligado à entrada de minutas de cliente externo com restrição contratual ou de controlador contra telemetria fora do Brasil.
+    </div>
+  </section>
+
+  <section>
+    <h2>5. Provas reais executadas</h2>
+    <p class="sub">
+      Saída real obtida com <code>C:\Users\Vitor\AppData\Local\Programs\beads\bd.exe</code> versão 1.3.4 e export de billing da LangSmith.
+    </p>
+    <div class="grid two">
+      <div class="card">
+        <p class="kicker">bd.exe list --status=open</p>
+        <pre><span class="ok">○ leia-lab-7n1</span> P2 Colher extracao isolada do acornworm para o master e arquivar branch/worktree
+<span class="amber">○ leia-lab-8z6</span> P3 Backend: API/contrato de avaliacao de contratos para a camada FE
+
+Total: 2 issues (2 open, 0 in progress) · 1 ready</pre>
+      </div>
+      <div class="card">
+        <p class="kicker">bd.exe stats e billing LangSmith</p>
+        <pre>Total Issues: <span class="ok">55</span> · Open: <span class="ok">2</span> · Blocked: <span class="amber">1</span> · Closed: <span class="ok">53</span> · Ready: <span class="ok">1</span>
+
+LangSmith Workspace 1 (8e0c5144-87dc-4aa5-902e-009b8476a8af):
+13/11/2026 00:00..14/11/2026 00:00 -> <span class="ok">3 Traces</span>
+16/11/2026 00:00..17/11/2026 00:00 -> <span class="ok">7 Traces</span>
+Total no mes: <span class="ok">10 Traces</span></pre>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      Artefato atualizado em 2026-11-16 em <code>docs/reviews/2026-11-16-beads-pendentes-e-risco3.html</code>.
+      Outorga condicional do Risco 3 registrada em <code>docs/adr/0002-motor-rastreio-e-gestao.md</code>.
+    </p>
+  </footer>
+
+</main>
+</body>
+</html>

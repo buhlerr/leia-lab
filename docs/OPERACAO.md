@@ -94,8 +94,10 @@ uv run python -m src.cli trace-usage --limit 5000 --warn 0.8   # sai com código
 ```
 
 Conta os traços raiz (1 por análise) do projeto no mês. O limite vale para a **organização**: se
-houver outros projetos, o número é um piso. A conferência final é o painel de billing (bead
-`leia-lab-8tr.9`). `list_runs` do SDK sai depois de 31/01/2027: migrar para `client.runs.query()`.
+houver outros projetos, o número é um piso. A conferência final no painel de billing foi fechada em
+2026-11-16 (`leia-lab-etv`): 10 traços faturáveis no mês em `Workspace 1` (3 em 13/11 e 7 em 16/11),
+confirmando 1 unidade por análise sem cobrança de sub-runs. `list_runs` do SDK sai depois de
+31/01/2027: migrar para `client.runs.query()`.
 
 ## Pendente
 
