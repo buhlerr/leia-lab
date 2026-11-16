@@ -89,13 +89,13 @@
     <h1>Três beads criadas e opções para decidir o Risco 3</h1>
     <p class="lede">
       O tracker do projeto estava com 51 itens fechados e zero abertos após o PR #21.
-      Três pendências documentadas viraram beads rastreáveis no Dolt local, e o Risco 3 da ADR-0002 recebeu outorga condicional em 2026-11-16.
+      Os cinco itens pendentes foram triados, o Risco 1 e o Risco 3 da ADR-0002 foram encerrados com decisão e prova real, e a fila ficou com duas beads abertas.
     </p>
     <div class="chips">
-      <span class="chip green">54 beads no total</span>
-      <span class="chip blue">3 abertas e prontas</span>
-      <span class="chip">51 fechadas</span>
-      <span class="chip green">Risco 3 outorgado (Opção 1)</span>
+      <span class="chip green">55 beads no total</span>
+      <span class="chip blue">2 abertas (1 pronta)</span>
+      <span class="chip">53 fechadas</span>
+      <span class="chip green">Risco 1 e Risco 3 resolvidos</span>
     </div>
   </div>
 </header>
@@ -114,9 +114,9 @@
         <p class="small">51 fechadas e nenhuma aberta</p>
       </div>
       <div class="card">
-        <p class="metric-label">Criadas agora</p>
-        <p class="metric">3</p>
-        <p class="small">etv, 8z6 e k34 no Dolt local</p>
+        <p class="metric-label">Criadas no ciclo</p>
+        <p class="metric">4</p>
+        <p class="small">etv e k34 fechadas; 7n1 e 8z6 abertas</p>
       </div>
       <div class="card">
         <p class="metric-label">Já existia</p>
@@ -125,8 +125,8 @@
       </div>
       <div class="card">
         <p class="metric-label">Depois</p>
-        <p class="metric" style="color:var(--green)">54 / 3</p>
-        <p class="small">54 no total e 3 prontas</p>
+        <p class="metric" style="color:var(--green)">55 / 2</p>
+        <p class="small">53 fechadas, 2 abertas e 1 pronta</p>
       </div>
     </div>
   </section>
@@ -150,19 +150,19 @@
           <td>Billing LangSmith (painel visual do Risco 1, continuação de <code>leia-lab-8tr.9</code>)</td>
           <td><code>leia-lab-etv</code></td>
           <td><code>task</code> · P2</td>
-          <td><code>human</code>, <code>ready-for-human</code> · aberta</td>
+          <td><code>human</code>, <code>ready-for-human</code> · fechada em 2026-11-16 (10 traços raiz no mês)</td>
         </tr>
         <tr>
-          <td>UI de uso final + auth de usuário final</td>
+          <td>Integração do produto com camada FE externa</td>
           <td><code>leia-lab-8z6</code></td>
           <td><code>feature</code> · P3</td>
-          <td><code>enhancement</code>, <code>needs-triage</code> · aberta</td>
+          <td><code>enhancement</code>, <code>needs-triage</code> · aberta (depende de <code>leia-lab-7n1</code>)</td>
         </tr>
         <tr>
           <td>Decisão sobre <code>acornworm</code> / <code>pydantic-ai</code></td>
-          <td><code>leia-lab-k34</code></td>
-          <td><code>decision</code> · P3</td>
-          <td><code>human</code>, <code>ready-for-human</code> · aberta</td>
+          <td><code>leia-lab-k34</code> e <code>leia-lab-7n1</code></td>
+          <td><code>decision</code> + <code>task</code> · P2/P3</td>
+          <td><code>k34</code> fechada (Opção A); <code>leia-lab-7n1</code> pronta para colher peças e arquivar</td>
         </tr>
         <tr>
           <td>MLflow self-host adiado</td>
@@ -181,31 +181,31 @@
   </section>
 
   <section>
-    <h2>3. Detalhe das três beads abertas</h2>
+    <h2>3. Detalhe das decisões e beads do ciclo</h2>
     <div class="grid three">
-      <div class="card verdict amber">
+      <div class="card verdict green">
         <span class="id">leia-lab-etv · task · P2</span>
         <h3>Billing visual da LangSmith</h3>
         <p>
-          A bead <code>leia-lab-8tr.9</code> conferiu pela API <code>trace-usage</code> a contagem de 6/5000 traços raiz no mês (3 análises offline e 3 reais, com cerca de 80 runs por análise). Falta abrir o painel web da LangSmith em Usage and Billing para confirmar se a cobrança conta 6 unidades ou os cerca de 480 sub-runs.
+          O export do painel Usage and Billing em <code>Workspace 1</code> (<code>8e0c5144-87dc-4aa5-902e-009b8476a8af</code>) mostrou 10 Traces no mês (3 em 13/11 e 7 em 16/11), provando cobrança por traço raiz sem contar os ~80 a 108 sub-runs por análise. Risco 1 fechado.
         </p>
-        <span class="tag amber">ready-for-human</span>
+        <span class="tag green">fechada · Risco 1 fechado</span>
       </div>
       <div class="card verdict blue">
         <span class="id">leia-lab-8z6 · feature · P3</span>
-        <h3>UI e auth de usuário final</h3>
+        <h3>API para camada FE externa</h3>
         <p>
-          O Django Admin em <code>src/management/</code> atende operadores internos atrás do SSO do Pangolin. Esta bead abre a definição de autenticação de usuário final e a interface de submissão e relatório sobre <code>build_analyze_minuta_graph</code>, avaliando colher extração isolada e sanitização de markdown do ramo <code>acornworm</code>.
+          O responsável definiu que usuários finais não terão acesso ao Django Admin nem às camadas internas deste repositório e subirão contratos por uma camada FE separada. A bead agora cobre o contrato backend com extração isolada, mascaramento e execução de <code>build_analyze_minuta_graph</code>.
         </p>
-        <span class="tag blue">needs-triage</span>
+        <span class="tag blue">bloqueada por leia-lab-7n1</span>
       </div>
-      <div class="card verdict green">
-        <span class="id">leia-lab-k34 · decision · P3</span>
-        <h3>Destino da branch acornworm</h3>
+      <div class="card verdict amber">
+        <span class="id">leia-lab-k34 fechada · leia-lab-7n1 pronta</span>
+        <h3>Colheita do acornworm antes de arquivar</h3>
         <p>
-          A branch <code>buhlerr/resume-previous-work-session</code> no worktree <code>C:/Users/Vitor/dev/leia-lab/acornworm</code> (topo <code>40e2732</code>, 49 arquivos) tem peças ausentes no <code>master</code> como <code>src/ingest/isolated.py</code> e <code>src/ui/render.py</code>. A decisão escolhe entre colher essas peças antes de arquivar, arquivar sem colheita ou manter congelada.
+          A decisão escolheu a Opção A: colher <code>src/ingest/extract.py</code>, <code>src/ingest/isolated.py</code> e <code>src/ingest/worker.py</code> para o <code>master</code> (e confirmar se <code>src/ui/render.py</code> segue para a camada FE) antes de arquivar a branch <code>buhlerr/resume-previous-work-session</code> e o worktree <code>acornworm</code>.
         </p>
-        <span class="tag green">ready-for-human</span>
+        <span class="tag amber">pronta em leia-lab-7n1</span>
       </div>
     </div>
   </section>
@@ -272,28 +272,24 @@
   <section>
     <h2>5. Provas reais executadas</h2>
     <p class="sub">
-      Saída real obtida com <code>C:\Users\Vitor\AppData\Local\Programs\beads\bd.exe</code> versão 1.3.4 nesta estação.
+      Saída real obtida com <code>C:\Users\Vitor\AppData\Local\Programs\beads\bd.exe</code> versão 1.3.4 e export de billing da LangSmith.
     </p>
     <div class="grid two">
       <div class="card">
         <p class="kicker">bd.exe list --status=open</p>
-        <pre><span class="ok">○ leia-lab-etv</span> P2 LangSmith: conferir painel de billing visualmente (fecha Risco 1 da ADR-0002)
-<span class="ok">○ leia-lab-8z6</span> P3 Produto: UI de uso final e autenticacao de usuario final
-<span class="ok">○ leia-lab-k34</span> P3 Decidir destino da branch acornworm (buhlerr/resume-previous-work-session / pydantic-ai)
+        <pre><span class="ok">○ leia-lab-7n1</span> P2 Colher extracao isolada do acornworm para o master e arquivar branch/worktree
+<span class="amber">○ leia-lab-8z6</span> P3 Backend: API/contrato de avaliacao de contratos para a camada FE
 
-Total: 3 issues (3 open, 0 in progress)</pre>
+Total: 2 issues (2 open, 0 in progress) · 1 ready</pre>
       </div>
       <div class="card">
-        <p class="kicker">bd.exe stats</p>
-        <pre>📊 Issue Database Status
+        <p class="kicker">bd.exe stats e billing LangSmith</p>
+        <pre>Total Issues: <span class="ok">55</span> · Open: <span class="ok">2</span> · Blocked: <span class="amber">1</span> · Closed: <span class="ok">53</span> · Ready: <span class="ok">1</span>
 
-Summary:
-  Total Issues:           <span class="ok">54</span>
-  Open:                   <span class="ok">3</span>
-  In Progress:            0
-  Blocked:                0
-  Closed:                 51
-  Ready to Work:          <span class="ok">3</span></pre>
+LangSmith Workspace 1 (8e0c5144-87dc-4aa5-902e-009b8476a8af):
+13/11/2026 00:00..14/11/2026 00:00 -> <span class="ok">3 Traces</span>
+16/11/2026 00:00..17/11/2026 00:00 -> <span class="ok">7 Traces</span>
+Total no mes: <span class="ok">10 Traces</span></pre>
       </div>
     </div>
   </section>

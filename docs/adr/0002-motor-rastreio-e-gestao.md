@@ -121,7 +121,7 @@ Descartado na pesquisa: RBAC ausente no OSS, histórico de falhas críticas e vo
 
 | # | Risco | Impacto | Como fechar |
 |---|---|---|---|
-| 1 | **Cobrança de sub-run na LangSmith** — a medição assumiu "trace = árvore inteira (1 raiz)" | Se sub-runs forem cobrados, a margem cai ~9× e a conta vira a do Langfuse (~460/mês) | Conferir o painel de billing com um mês de uso real; se cair, trocar para a Combinação 4 (MLflow self-host) ou 3 |
+| 1 | **Cobrança de sub-run na LangSmith** — a medição assumiu "trace = árvore inteira (1 raiz)" | Se sub-runs forem cobrados, a margem cai ~9× e a conta vira a do Langfuse (~460/mês) | **Fechado em 2026-11-16 (bead `leia-lab-etv`).** Painel Usage and Billing em `Workspace 1` confirmou 10 Traces no mês (3 em 13/11 e 7 em 16/11), sem cobrança por sub-run |
 | 2 | **Retenção de 14 dias** no grátis | Traços antigos somem; **não** afeta a auditoria (que é o Postgres) | Nenhuma ação enquanto a auditoria for o Postgres; reavaliar se alguém exigir retenção de traço |
 | 3 | **LGPD / residência** | Nenhuma nuvem candidata tem região no Brasil | **Outorga condicional (2026-11-16, Opção 1).** Aceito para a fase atual com LangSmith US sob as 4 travas ativas (mascaramento prévio via `mask_personal_data`, ausência de `raw_text` no estado, `--trace` apenas sob demanda sem links públicos e auditoria só no Postgres do CT 116). Gatilho para reabrir `leia-lab-4fv` (Combinação 4, MLflow self-host): entrada de minutas de cliente externo cujo contrato ou controlador proíba suboperador de telemetria fora do Brasil |
 | 4 | **Qualidade de detecção não medida** | Jev/LLM offline são stubs; o que foi provado é o **mecanismo**, não a qualidade | Rodar o gabarito com `TYPESAFE_API_KEY` e minutas reais mascaradas (item M4 do épico) |
