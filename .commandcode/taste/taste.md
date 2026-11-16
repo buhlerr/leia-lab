@@ -4,4 +4,5 @@
 - Judges admin/data-entry UIs by ergonomics of related fields: expects foreign keys and enums to appear as labeled selectors/dropdowns ("já estava tudo categorizado"), and treats raw IDs or free-text typing as a defect to fix rather than an acceptable baseline. Confidence: 0.6
 - Rejects per-session workarounds as the final answer: when told to invoke a tool by full path or "just be careful", pushes back asking for a definitive fix at the config/system level (e.g., reordering PATH), accepting a one-time setup change with backup over repeating manual steps. Confidence: 0.6
 - Wants replies in Brazilian Portuguese (pt-BR) — states it explicitly in requests, so default to pt-BR prose rather than English. Confidence: 0.8
+- Publishable HTML artifacts (reviews, explainers) must be stored in the repo at `docs/reviews/YYYY-MM-DD-<slug>.html` — a durable naming/location convention, with the matching `.md` alongside. Confidence: 0.75
 - Prefers locally generated bootstrap files (e.g., `CLAUDE.md`) to be ignored via `.git/info/exclude` rather than committed, keeping `git status` clean. Confidence: 0.85
