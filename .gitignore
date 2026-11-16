@@ -21,3 +21,10 @@ __pycache__/
 # Minutas e base normativa locais: NUNCA versionar (leia-lab-ni7; lidas por LEIA_MINUTAS_DIR)
 leia-minutas-teste-mascaradas/
 leia-kb-legislacao/
+# shelve-managed-block
+.env
+.env.*
+!.env.template
+!.env.example
+.shelve/
+# end shelve-managed-block

@@ -20,11 +20,28 @@ grupos `editor` ou `leitor`.
 
 API de integração do Pangolin: `https://pangolin.rauvbr.com/v1` (rota `integration-api-rauvbr` no
 `dynamic_config.yml` do Traefik na VPS, backup `dynamic_config.yml.bak-integration-rauvbr-20261116`).
-A chave fica no ambiente `ouoe7lplcgxddx76zfxr2uemcy` do 1Password; use **uma** chamada
-`op run --environment <id> -- <script>` por tarefa (cada chamada pede desbloqueio).
+A chave fica no **Shelve** (time `vitor`, projeto `LEIA`), ver "Segredos" abaixo.
 
 Se um Newt mudar de máquina, atualize os IPs em `/usr/local/sbin/leia-admin-firewall.sh` no CT 116 e
 rode `systemctl restart leia-admin-firewall`.
+
+## Segredos (Shelve)
+
+`shelve.json` na raiz aponta para o time `vitor`, projeto `LEIA` (padrão `development`; `production`
+protegido contra push). Os segredos entram só no processo filho, sem `.env` em disco:
+
+```bash
+shelve run --env production -- uv run python -m src.cli gold-run --label real-v1 --trace
+```
+
+| No Shelve | Fora dele |
+|---|---|
+| `PANGOLIN_API_KEY`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT` | `SHELVE_TOKEN` e `LEIA_HOMELAB_PG_PASSWORD` / `LEIA_HOMELAB_DIRECTUS_PASSWORD` (variáveis de usuário do Windows) |
+
+- Rode pelo **Git Bash**: o PowerShell remove o `--` antes de repassar a comandos nativos, e o
+  `shelve run` passa a tratar o nome do ambiente como o programa ("Failed to start child process").
+- **Não use `shelve pull`** em sessão de agente (grava os segredos em claro no disco).
+- Faltam `TYPESAFE_API_KEY` e `OPENROUTER_API_KEY` (bead `leia-lab-8tr.9`): cadastre pelo app.
 
 ## Backup e restore do Postgres
 
