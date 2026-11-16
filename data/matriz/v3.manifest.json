@@ -1,0 +1,15 @@
+{
+  "versao": "v3",
+  "arquivo": "v3.jsonl",
+  "sha256": "ef3247462476725367043cad780630a10be8579ee6ddee66c2f8680ec3dcb6c6",
+  "linhas": 184,
+  "origem": {
+    "base": "matriz/v2",
+    "confirmacao": "locacao-01, clausula 1: cabecalho com partes, endereco, datas e aluguel em branco",
+    "parecer": "gold/reviews/2026-11-16-locacao-02.json",
+    "mudancas": [
+      "R007: criticidade amarelo -> vermelho"
+    ]
+  },
+  "aviso": "Dados de apoio a analise juridica. A v3 promove o R007 a vermelho com base na locacao-01. Os demais riscos NAO foram validados por advogado. Revisao humana obrigatoria."
+}

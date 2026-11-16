@@ -87,6 +87,18 @@ def test_matrix_v2_reflects_the_lawyer_review():
     assert len(sha) == 64
 
 
+def test_matrix_v3_promotes_r007():
+    rows, sha = read_matrix("v3")
+    raw = [json.loads(line) for line in (DATA_DIR / "matriz" / "v3.jsonl").read_text(encoding="utf-8").splitlines() if line]
+    assert len(rows) == len(raw) == 184 and len({t for t, _ in rows}) == 31
+    by_id = {x["id"]: x for _, x in rows}
+    assert by_id["R007"]["cor"] == "vermelho"
+    assert by_id["R054"]["cor"] == "vermelho"
+    assert "R176" not in by_id
+    assert all(x["normas"] for _, x in rows if x["cor"] == "vermelho")
+    assert len(sha) == 64
+
+
 def test_base_v1_reads_every_article_with_unique_citation():
     artigos, _ = read_base("v1")
     assert len(artigos) == 330
@@ -154,6 +166,20 @@ async def test_apply_matrix_v2_transitions_from_v1(pool):
     t = snap.content["types"]["locacao_residencial"]
     assert sum(map(len, t["riscos"].values())) == 184
     assert await apply_matrix(pool, "v2", base_version="v1") is False
+
+
+async def test_apply_matrix_v3_promotes_r007(pool):
+    await init_db(pool)
+    await seed_defaults(pool)
+    assert await apply_matrix(pool, "v2") is True
+    assert await apply_matrix(pool, "v3") is True
+
+    active = await pool.fetch("SELECT risk_id, criticality FROM risk_matrix WHERE active")
+    assert len(active) == 184
+    by_id = {r["risk_id"]: r["criticality"] for r in active}
+    assert by_id["R007"] == "vermelho" and by_id["R054"] == "vermelho"
+    assert "R176" not in by_id
+    assert await apply_matrix(pool, "v3") is False
 
 
 async def test_apply_matrix_refuses_a_changed_published_version(pool, tmp_path):
