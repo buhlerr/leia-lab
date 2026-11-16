@@ -1,0 +1,2 @@
+# Dados versionados: o sha256 do MANIFEST vale para os bytes exatos; sem conversao de fim de linha.
+data/** -text

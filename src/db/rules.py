@@ -81,7 +81,10 @@ async def load_rules_snapshot(pool: asyncpg.Pool) -> RulesSnapshot:
     theme_slug = {t["id"]: t["slug"] for t in themes}
     out: dict[str, Any] = {}
     for ty in types:
-        mine = [t for t in themes if t["minuta_type_id"] == ty["id"]]
+        # Tema sem nenhum risco ativo fica de fora: nao ha o que confirmar nele (ex.: temas da
+        # matriz padrao depois que uma matriz versionada substitui os riscos).
+        with_risk = {r["theme_id"] for r in risks}
+        mine = [t for t in themes if t["minuta_type_id"] == ty["id"] and t["id"] in with_risk]
         mine_ids = {t["id"] for t in mine}
         riscos: dict[str, list[dict[str, Any]]] = {}
         for r in risks:

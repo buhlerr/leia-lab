@@ -1,0 +1,12 @@
+{
+  "versao": "v1",
+  "arquivo": "v1.jsonl",
+  "sha256": "a982811c2647aeb334a37c54c3780a4e0893c6b5016ee041026ef5f59c3ca28d",
+  "linhas": 185,
+  "origem": {
+    "repo": "buhlerr/leia-kb-legislacao",
+    "commit": "242d540",
+    "caminho": "levantamento/matriz-riscos.jsonl"
+  },
+  "aviso": "Dados de apoio a analise juridica, NAO validados por advogado. Revisao humana obrigatoria."
+}
