@@ -5,6 +5,9 @@ The committed ``gold/gold_set.json`` holds NO minuta text: only file name + sha2
 risk ids. The minutas themselves stay outside git (``LEIA_MINUTAS_DIR``) and are read by absolute path.
 
 Labels are prototype labels written by the foundation worker, NOT lawyer-validated.
+
+A clause may also carry ``expected_severity`` (``{risk id: red/yellow/green}``); ``score`` measures those
+severities apart from the id metrics, and an id without a declared severity is not severity-measured.
 """
 
 from __future__ import annotations
@@ -20,6 +23,8 @@ from src.ingest.masking import mask_personal_data
 
 GOLD_PATH = Path(__file__).resolve().parents[2] / "gold" / "gold_set.json"
 Key = tuple[str, int]  # (minuta file name, clause number)
+Severities = dict[str, str]  # {risk id: severity}, severity being the alert vocabulary red/yellow/green
+Detection = dict[Key, Severities]  # {(minuta file name, clause number): {risk id: detected severity}}
 
 
 def sha256_text(s: str) -> str:
@@ -77,23 +82,37 @@ def build_gold(directory: Path, labels: list[tuple[str, int, list[str]]], note: 
     return {"version": 1, "note": note, "minutas": minutas, "clauses": clauses}
 
 
-def detected_from_report(report: dict[str, Any]) -> dict[int, set[str]]:
-    """``{clause_n: {risk ids}}`` from a report envelope (``analyses.report``)."""
-    out: dict[int, set[str]] = {}
+def detected_from_report(report: dict[str, Any]) -> dict[int, Severities]:
+    """``{clause_n: {risk id: severity}}`` from a report envelope (``analyses.report``)."""
+    out: dict[int, Severities] = {}
     for a in (report.get("content") or {}).get("alerts", []):
-        out.setdefault(a["clause_index"], set()).add(a["risk_id"])
+        out.setdefault(a["clause_index"], {})[a["risk_id"]] = a["severity"]
     return out
 
 
-def score(gold: dict[str, Any], detected: dict[Key, set[str]]) -> dict[str, Any]:
-    """Expected vs detected risk ids over the gold clauses (micro precision/recall/F1 + exact-match rate)."""
+def score(gold: dict[str, Any], detected: Detection) -> dict[str, Any]:
+    """Expected vs detected risk ids over the gold clauses (micro precision/recall/F1 + exact-match rate).
+
+    ``severity`` is scored separately: only ids both declared in ``expected_severity`` and detected in
+    that clause are compared, so a missing detection is an id error, never a severity error.
+    """
     tp = fp = fn = exact = 0
     per_clause: dict[str, dict[str, Any]] = {}
+    compared = correct = 0
+    sev_per_clause: dict[str, dict[str, Any]] = {}
     for c in gold["clauses"]:
-        exp, got = set(c["expected"]), set(detected.get((c["file"], c["clause_n"]), set()))
-        tp, fp, fn = tp + len(exp & got), fp + len(got - exp), fn + len(exp - got)
-        exact += exp == got
-        per_clause[c["id"]] = {"expected": sorted(exp), "detected": sorted(got), "missed": sorted(exp - got), "extra": sorted(got - exp)}
+        exp = set(c["expected"])
+        got = dict(detected.get((c["file"], c["clause_n"]), {}))
+        got_ids = set(got)
+        tp, fp, fn = tp + len(exp & got_ids), fp + len(got_ids - exp), fn + len(exp - got_ids)
+        exact += exp == got_ids
+        per_clause[c["id"]] = {"expected": sorted(exp), "detected": sorted(got_ids), "missed": sorted(exp - got_ids), "extra": sorted(got_ids - exp)}
+        expected_severity = c.get("expected_severity") or {}
+        measured = sorted(rid for rid in expected_severity if rid in got)
+        if measured:
+            wrong = [{"risk_id": rid, "expected": expected_severity[rid], "detected": got[rid]} for rid in measured if got[rid] != expected_severity[rid]]
+            compared, correct = compared + len(measured), correct + len(measured) - len(wrong)
+            sev_per_clause[c["id"]] = {"wrong": wrong}
     p = tp / (tp + fp) if tp + fp else 1.0
     r = tp / (tp + fn) if tp + fn else 1.0
     return {
@@ -101,6 +120,11 @@ def score(gold: dict[str, Any], detected: dict[Key, set[str]]) -> dict[str, Any]
         "precision": round(p, 3), "recall": round(r, 3), "f1": round(2 * p * r / (p + r), 3) if p + r else 0.0,
         "exact_match": f"{exact}/{len(gold['clauses'])}",
         "per_clause": per_clause,
+        "severity": {
+            "compared": compared, "correct": correct, "wrong": compared - correct,
+            "accuracy": round(correct / compared, 3) if compared else None,
+            "per_clause": sev_per_clause,
+        },
     }
 
 
@@ -116,11 +140,11 @@ def compare(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
     return {"delta": delta, "changed_clauses": changed}
 
 
-async def detected_from_analyses(pool: Any, analyses: dict[str, str]) -> dict[Key, set[str]]:
+async def detected_from_analyses(pool: Any, analyses: dict[str, str]) -> Detection:
     """Read detections from stored analyses (``{minuta file: analysis_id}``): comparable across matrix versions."""
-    out: dict[Key, set[str]] = {}
+    out: Detection = {}
     for name, aid in analyses.items():
         rep = await pool.fetchval("SELECT report FROM analyses WHERE id = $1::uuid", aid)
-        for n, ids in detected_from_report(json.loads(rep) if isinstance(rep, str) else rep or {}).items():
-            out[(name, n)] = ids
+        for n, severities in detected_from_report(json.loads(rep) if isinstance(rep, str) else rep or {}).items():
+            out[(name, n)] = severities
     return out

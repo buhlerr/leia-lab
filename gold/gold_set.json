@@ -1,6 +1,6 @@
 {
   "version": 3,
-  "note": "Prototype labels remapped to the real matrix ids (R001..R185) of data/matriz/v1.jsonl (bead leia-lab-8tr.13). Clauses g04-g05 and g11-g16 of locacao-02 were validated by a lawyer (gold/reviews/2026-11-16-locacao-02.json): R011, R026, R179, R128, R131, R174, R107. Deliberately excluded: R007 from the locacao-02 clauses (lawyer: wrong excerpt, risk location unconfirmed; it is covered by g17 in locacao-01 instead), R176 (lawyer: not a risk) and the green/conforme rows R056/R180 (not expected alerts). All other clauses remain prototype labels, NOT lawyer-validated. g17 covers the locacao-01 clause 1 header (blank parties, address, dates, rent), expected R001/R006/R007; confirmed as the clean case for R007 (bead leia-lab-q3t) but NOT lawyer-validated. Clause numbers are segment_clauses() over the MASKED minuta. No minuta text is stored here.",
+  "note": "Prototype labels remapped to the real matrix ids (R001..R185) of data/matriz/v1.jsonl (bead leia-lab-8tr.13). Clauses g04-g05 and g11-g16 of locacao-02 were validated by a lawyer (gold/reviews/2026-11-16-locacao-02.json): R011, R026, R179, R128, R131, R174, R107. Deliberately excluded: R007 from the locacao-02 clauses (lawyer: wrong excerpt, risk location unconfirmed; it is covered by g17 in locacao-01 instead), R176 (lawyer: not a risk) and the green/conforme rows R056/R180 (not expected alerts). All other clauses remain prototype labels, NOT lawyer-validated. g17 covers the locacao-01 clause 1 header (blank parties, address, dates, rent), expected R001/R006/R007; confirmed as the clean case for R007 (bead leia-lab-q3t) but NOT lawyer-validated. Clause numbers are segment_clauses() over the MASKED minuta. No minuta text is stored here. Severity uses the alert vocabulary red/yellow/green, mirroring the matrix criticality vermelho/amarelo/verde; only g05 and g17 carry expected_severity today, so every other clause is not severity-measured.",
   "minutas": {
     "locacao-01.txt": {
       "sha256": "60af5bad5f65cbc1cc408c1e2c1f1b6d44e7481d5ca5e8ecda923d6d57ce2869"
@@ -60,7 +60,10 @@
       "expected": [
         "R053",
         "R054"
-      ]
+      ],
+      "expected_severity": {
+        "R054": "red"
+      }
     },
     {
       "id": "g06",
@@ -176,7 +179,12 @@
         "R001",
         "R006",
         "R007"
-      ]
+      ],
+      "expected_severity": {
+        "R001": "yellow",
+        "R006": "yellow",
+        "R007": "red"
+      }
     }
   ]
 }
