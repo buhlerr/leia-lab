@@ -1,8 +1,8 @@
-"""Texto dos prompts do grafo de analise, como dado de seed do tipo ``locacao_residencial``.
+"""Texto dos prompts do tipo ``locacao_residencial``: dado de SEED, nao configuracao do grafo.
 
-Ate a M2a o grafo ainda usa as proprias constantes; ``tests/test_domain_seed.py`` garante que
-este texto e o do grafo sao iguais. Na M2a o grafo passa a ler da tabela ``prompts`` e as
-constantes saem dele, ficando so aqui.
+``seed_defaults`` grava isto nas tabelas ``prompts`` / ``minuta_types``. O grafo nunca importa
+este modulo: ele le o que estiver no banco (pela foto de regras de cada analise). Os textos sao
+os que o grafo usava como constantes antes da M2a.
 """
 
 LOCACAO_RESIDENCIAL = "locacao_residencial"

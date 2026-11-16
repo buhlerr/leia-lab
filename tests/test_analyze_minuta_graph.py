@@ -1,6 +1,8 @@
 from src.db.connection import init_db
+from src.db.seed import seed_defaults
 from src.graphs.analyze_minuta_graph import build_analyze_minuta_graph
 from src.graphs.ingest_graph import build_ingest_graph
+from tests._rules_helper import use_rules
 
 
 async def test_analyze_minuta_graph_end_to_end_supported_contract(pool, settings):
@@ -25,13 +27,8 @@ async def test_analyze_minuta_graph_end_to_end_supported_contract(pool, settings
             }
         ]
     }
-    graph = build_analyze_minuta_graph(
-        pool,
-        settings,
-        riscos=riscos,
-        temas=["reajuste_e_indexacao"],
-        tema_map={"reajuste_e_indexacao": []},
-    )
+    await use_rules(pool, riscos, ["reajuste_e_indexacao"])
+    graph = build_analyze_minuta_graph(pool, settings)
 
     minuta = (
         "CONTRATO DE LOCAÇÃO RESIDENCIAL\n"
@@ -60,6 +57,7 @@ async def test_analyze_minuta_graph_end_to_end_supported_contract(pool, settings
 
 async def test_analyze_minuta_graph_short_circuits_unsupported_doc(pool, settings):
     await init_db(pool)
+    await seed_defaults(pool)
     graph = build_analyze_minuta_graph(pool, settings)
 
     out = await graph.ainvoke(
@@ -96,6 +94,7 @@ async def test_unsupported_doc_never_calls_ficha_triar_buscar_analisar(pool, set
     monkeypatch.setattr(mod, "hybrid_search_rrf", boom)
 
     await init_db(pool)
+    await seed_defaults(pool)
     graph = mod.build_analyze_minuta_graph(pool, settings)
     out = await graph.ainvoke({"raw_text": "ATA DE ASSEMBLEIA GERAL.", "filename": "ata.txt"})
     assert out["report_envelope"]["status"] == "unsupported"
@@ -137,10 +136,8 @@ async def test_triage_cutoff_gates_risk_checks(pool, settings, monkeypatch):
         return res
 
     monkeypatch.setattr(mod, "call_jev", spy)
-    await init_db(pool)
-    graph = mod.build_analyze_minuta_graph(
-        pool, settings, riscos=_RISCOS, temas=["reajuste_e_indexacao"], tema_map={}
-    )
+    await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
+    graph = mod.build_analyze_minuta_graph(pool, settings)
     out = await graph.ainvoke({"raw_text": _MINUTA, "filename": "minuta.txt"})
 
     assert not any("REAJ-01" in q for q in asked)
@@ -177,9 +174,8 @@ async def test_jev_concurrency_is_capped_across_nested_fanouts(pool, settings, m
         "conforme ajustado entre as partes neste instrumento contratual de locação residencial."
         for i in range(1, 13)
     )
-    graph = mod.build_analyze_minuta_graph(
-        pool, settings, riscos=_RISCOS, temas=["reajuste_e_indexacao"], tema_map={}
-    )
+    await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
+    graph = mod.build_analyze_minuta_graph(pool, settings)
     await graph.ainvoke({"raw_text": "CONTRATO DE LOCAÇÃO RESIDENCIAL\n" + clausulas, "filename": "m.txt"})
 
     assert 1 < peak <= mod._CONCURRENCY
@@ -195,14 +191,14 @@ async def test_tema_map_ids_resolve_to_citation_without_duplicates_or_empty_norm
             "doc_name": "Lei 10.192/2001, art. 2º",
         }
     )
-    graph = build_analyze_minuta_graph(
+    await use_rules(
         pool,
-        settings,
-        riscos=_RISCOS,
-        temas=["reajuste_e_indexacao"],
+        _RISCOS,
+        ["reajuste_e_indexacao"],
         # id known to the matrix, plus one id/citation absent from the KB.
-        tema_map={"reajuste_e_indexacao": ["lei-10192-2001-art-2", "lei-9999-inexistente"]},
+        {"reajuste_e_indexacao": ["lei-10192-2001-art-2", "lei-9999-inexistente"]},
     )
+    graph = build_analyze_minuta_graph(pool, settings)
     out = await graph.ainvoke({"raw_text": _MINUTA, "filename": "minuta.txt"})
 
     for cl in out["clausulas"]:
