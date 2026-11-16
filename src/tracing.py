@@ -53,3 +53,22 @@ def langsmith_tracing(client: Client | None = None, project_name: str | None = N
             yield client
         finally:
             client.flush()
+
+
+def month_start(now: Any = None) -> Any:
+    import datetime as dt
+
+    now = now or dt.datetime.now(dt.UTC)
+    return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+
+def trace_usage(client: Any, project_name: str, *, limit: int, warn_at: float = 0.8, now: Any = None) -> dict[str, Any]:
+    """Tracos (runs raiz) do projeto no mes corrente contra o limite do plano.
+
+    A LangSmith cobra por traco (a arvore inteira, 1 por analise). O limite do plano vale para a
+    ORGANIZACAO: se houver outros projetos, a contagem deste e um piso, nao o total.
+    """
+    since = month_start(now)
+    n = sum(1 for _ in client.list_runs(project_name=project_name, is_root=True, start_time=since, select=["id"]))
+    status = "estourado" if n >= limit else "alerta" if n >= warn_at * limit else "ok"
+    return {"project": project_name, "since": since.date().isoformat(), "traces": n, "limit": limit, "status": status}

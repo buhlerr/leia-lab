@@ -184,7 +184,7 @@ def ingest_upload(filename: str, data: bytes, *, title: str, source: str) -> str
     citacao exata usada na matriz (ex.: "Lei 8.245/1991, art. 4").
     """
     from src.config import Settings
-    from src.graphs.ingest_graph import build_ingest_graph
+    from src.graphs.ingest_graph import build_ingest_graph, ingest
 
     suffix = Path(filename).suffix.lower()
     if suffix not in KB_SUFFIXES:
@@ -194,8 +194,7 @@ def ingest_upload(filename: str, data: bytes, *, title: str, source: str) -> str
         path.write_bytes(data)
 
         async def go(pool: asyncpg.Pool) -> str:
-            graph = build_ingest_graph(pool, Settings())
-            out = await graph.ainvoke({"file_path": str(path), "doc_name": title, "source": source})
+            out = await ingest(build_ingest_graph(pool, Settings()), file_path=path, doc_name=title, source=source)
             return out["doc_id"]
 
         return run_with_pool(go)

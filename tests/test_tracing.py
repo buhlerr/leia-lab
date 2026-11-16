@@ -92,3 +92,29 @@ async def test_gold_run_compares_two_matrix_versions(seeded, settings):
     assert cmp["changed_clauses"] and set(cmp["delta"]) == {"precision", "recall", "f1"}
     # a rodada antiga, re-pontuada depois da mudanca, continua igual: vem de analyses, nao da matriz atual
     assert (await gold_compare(seeded, v1["analyses"], v1["analyses"]))["a"] == v1["score"]
+
+
+# ---------------------------------------------------------------- limite do plano (M6)
+
+
+class _FakeRuns:
+    def __init__(self, n: int) -> None:
+        self.n, self.calls = n, []
+
+    def list_runs(self, **kw):
+        self.calls.append(kw)
+        return iter(range(self.n))
+
+
+@pytest.mark.parametrize(("n", "status"), [(10, "ok"), (4000, "alerta"), (5000, "estourado")])
+def test_trace_usage_counts_root_runs_of_the_month(n, status):
+    import datetime as dt
+
+    from src.tracing import trace_usage
+
+    fake = _FakeRuns(n)
+    res = trace_usage(fake, "leia-lab", limit=5000, now=dt.datetime(2026, 11, 16, 15, 30, tzinfo=dt.UTC))
+    assert (res["traces"], res["status"], res["since"]) == (n, status, "2026-11-01")
+    call = fake.calls[0]
+    assert call["is_root"] is True and call["project_name"] == "leia-lab"  # 1 traco = 1 raiz = 1 analise
+    assert call["start_time"] == dt.datetime(2026, 11, 1, tzinfo=dt.UTC)

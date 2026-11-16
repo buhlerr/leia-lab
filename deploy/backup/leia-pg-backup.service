@@ -1,0 +1,8 @@
+[Unit]
+Description=Backup do Postgres da Leia (CT 116)
+After=pve-guests.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/leia-pg-backup.sh
+Nice=10

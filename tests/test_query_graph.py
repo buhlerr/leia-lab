@@ -3,6 +3,7 @@ import respx
 from src.config import Settings
 from src.db.connection import init_db
 from src.graphs.ingest_graph import build_ingest_graph
+from src.graphs.ingest_graph import ingest as run_ingest
 from src.graphs.query_graph import CONSULTA_PROMPT_TEMPLATE, build_query_graph
 
 
@@ -10,7 +11,7 @@ from src.graphs.query_graph import CONSULTA_PROMPT_TEMPLATE, build_query_graph
 async def test_query_graph_retrieves_chunks_formats_prompt_and_answers(pool, settings):
     await init_db(pool)
     ingest = build_ingest_graph(pool, settings)
-    await ingest.ainvoke(
+    await run_ingest(ingest, **
         {
             "raw_text": "Cláusula 5ª - O prazo da locação residencial é de 30 meses.",
             "filename": "locacao-01.txt",
