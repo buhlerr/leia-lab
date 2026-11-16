@@ -4,6 +4,28 @@ Como o que está em produção no homelab é protegido, restaurado e vigiado. Ac
 Proxmox (`pve`, 192.168.0.9) com `pct exec 116`. **Não use SSH direto em 192.168.0.120**: outro
 aparelho na rede já respondeu por esse IP (conflito de ARP, ver bead `leia-lab-1g1.10`).
 
+## Acesso ao admin: só por HTTPS, pelo Pangolin
+
+| Peça | Estado (2026-11-16) |
+|---|---|
+| Endereço | **https://admin.rauvbr.com** (recurso Pangolin id 54, org `vitor`), SSL e **SSO do Pangolin** na frente |
+| Caminho | Pangolin (VPS Oracle) → site Newt `proxmox` → `192.168.0.120:8000` (CT 116) |
+| HTTP | `http://admin.rauvbr.com` redireciona para HTTPS |
+| Porta 8000 na LAN | **fechada**: só os conectores Newt (host pve `192.168.0.9` e CT 103 `192.168.0.128`) passam. Firewall `leia-admin-firewall.service` no CT 116 (cadeia `LEIA-ADMIN` em `DOCKER-USER`, reaplicada no boot) |
+| Django | `DJANGO_ALLOWED_HOSTS` e `DJANGO_CSRF_TRUSTED_ORIGINS` com `admin.rauvbr.com`; `DJANGO_BEHIND_HTTPS_PROXY=true` (cookies `Secure`) entra no deploy seguinte |
+
+Quem pode entrar é decidido no Pangolin (recurso → Authentication: usuários e papéis), antes do login
+do Django. Para incluir uma pessoa: dê acesso ao recurso no Pangolin **e** crie o usuário no Django nos
+grupos `editor` ou `leitor`.
+
+API de integração do Pangolin: `https://pangolin.rauvbr.com/v1` (rota `integration-api-rauvbr` no
+`dynamic_config.yml` do Traefik na VPS, backup `dynamic_config.yml.bak-integration-rauvbr-20261116`).
+A chave fica no ambiente `ouoe7lplcgxddx76zfxr2uemcy` do 1Password; use **uma** chamada
+`op run --environment <id> -- <script>` por tarefa (cada chamada pede desbloqueio).
+
+Se um Newt mudar de máquina, atualize os IPs em `/usr/local/sbin/leia-admin-firewall.sh` no CT 116 e
+rode `systemctl restart leia-admin-firewall`.
+
 ## Backup e restore do Postgres
 
 | O quê | Onde |
@@ -27,8 +49,9 @@ ssh root@192.168.0.9 journalctl -u leia-pg-backup.service -n 20        # último
 idênticas ao manifesto, gatilho append-only ativo. Também conferido que um manifesto adulterado
 (`risk_matrix` 999 contra 6) faz o teste falhar.
 
-Limite conhecido: o backup fica no mesmo host físico do CT. Se o `pve` morrer, os dois somem. Uma
-cópia fora do homelab é decisão pendente.
+Cópia fora do homelab: decidido (2026-11-16) que vem do backup do Proxmox guardado na VPS do
+usuário, configurado por ele. O dump diário daqui fica no pve; o backup do pve leva `/var/backups/leia`
+junto se o job incluir o host, ou o CT 116 inteiro via vzdump.
 
 ## Rastreio (LangSmith): quem vê o quê
 
@@ -59,5 +82,8 @@ houver outros projetos, o número é um piso. A conferência final é o painel d
 
 ## Pendente
 
-- **HTTPS do admin pelo Pangolin:** o token em `mcp-pangolin/.env` respondeu 401. É preciso um token
-  válido e o subdomínio desejado. Até lá o admin é HTTP só na LAN (`http://192.168.0.120:8000`).
+- Ligar `DJANGO_BEHIND_HTTPS_PROXY=true` no `django.env` do CT 116 no próximo deploy do admin (exige o
+  código deste PR).
+- O alvo `192.168.0.120` já teve conflito de ARP com outro aparelho (MAC `bc:24:11:06:70:6e`, bead
+  `leia-lab-1g1.10`). O ARP fixo está no pve, mas não no CT 103, que também roda Newt: identifique o
+  aparelho ou fixe o ARP no CT 103 também.

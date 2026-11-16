@@ -7,8 +7,9 @@ Variaveis de ambiente:
 * ``DJANGO_SECRET_KEY``: obrigatoria, exceto com ``DJANGO_DEBUG=true`` ou rodando os testes.
 * ``DJANGO_ALLOWED_HOSTS``: lista separada por virgula (padrao: so localhost).
 * ``DJANGO_DEBUG``: ``true`` so em desenvolvimento.
-
-TLS e backup ficam na M6; ate la o admin roda so na rede do homelab.
+* ``DJANGO_BEHIND_HTTPS_PROXY``: ``true`` quando o admin fica atras do Pangolin (HTTPS termina no
+  proxy): o Django confia no ``X-Forwarded-Proto`` e os cookies de sessao/CSRF viram ``Secure``.
+  So ligue com a porta do admin fechada para tudo que nao seja o proxy (o cabecalho e forjavel).
 """
 
 import os
@@ -35,6 +36,11 @@ ALLOWED_HOSTS = [
 CSRF_TRUSTED_ORIGINS = [
     o.strip() for o in os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",") if o.strip()
 ]
+
+if os.environ.get("DJANGO_BEHIND_HTTPS_PROXY", "false").lower() in ("1", "true", "yes"):
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
 
 INSTALLED_APPS = [
     "django.contrib.admin",
