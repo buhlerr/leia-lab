@@ -59,7 +59,11 @@ async def gold_compare(pool: asyncpg.Pool, a: dict[str, str], b: dict[str, str])
 
 
 def _line(label: str, s: dict[str, Any]) -> str:
-    return f"[{label}] P={s['precision']} R={s['recall']} F1={s['f1']} exact={s['exact_match']}"
+    line = f"[{label}] P={s['precision']} R={s['recall']} F1={s['f1']} exact={s['exact_match']}"
+    severity = s.get("severity") or {}
+    if severity.get("accuracy") is not None:
+        line += f" sev={severity['correct']}/{severity['compared']} ({severity['accuracy']})"
+    return line
 
 
 def _trace_usage(args: argparse.Namespace) -> int:
