@@ -8,6 +8,7 @@ import re
 import httpx
 
 from src.config import Settings
+from src.tracing import client_span, tag_span
 
 _RISK_LINE = re.compile(r"^\s*-\s*([^\s:]+)\s*:\s*(.+?)\s*$", re.MULTILINE)
 _CLAUSE = re.compile(r"<clausula>(.*?)</clausula>", re.DOTALL)
@@ -32,6 +33,7 @@ def _offline(system_prompt: str, user_prompt: str) -> str:
     return json.dumps({"alertas": alertas}, ensure_ascii=False)
 
 
+@client_span("chat_completion", allowed=("system_prompt", "user_prompt", "temperature", "max_tokens"))
 async def chat_completion(
     system_prompt: str,
     user_prompt: str,
@@ -42,6 +44,7 @@ async def chat_completion(
 ) -> tuple[str, int]:
     """Retorna ``(texto, tokens_usados)``; offline (0 tokens) sem ``OPENROUTER_API_KEY``."""
     settings = settings or Settings()
+    tag_span(model=settings.CHAT_MODEL, offline=not settings.OPENROUTER_API_KEY)
 
     if not settings.OPENROUTER_API_KEY:
         return _offline(system_prompt, user_prompt), 0

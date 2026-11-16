@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 
 from src.config import Settings
+from src.tracing import client_span, tag_span
 
 _RETRY_STATUS = {429, 529}
 _MAX_ATTEMPTS = 4
@@ -35,6 +36,7 @@ def _offline_answer(q: dict[str, Any], state_text: str) -> dict[str, Any]:
     return {"choice": choice, "confidence": 0.95, "probabilities": {choice: 0.95}}
 
 
+@client_span("call_jev", allowed=("state", "questions"))
 async def call_jev(
     state: dict[str, Any],
     questions: dict[str, Any],
@@ -42,6 +44,7 @@ async def call_jev(
 ) -> dict[str, Any]:
     """Faz as ``questions`` ao Jev sobre ``state``; offline sem ``TYPESAFE_API_KEY``."""
     settings = settings or Settings()
+    tag_span(model=settings.JEV_MODEL, offline=not settings.TYPESAFE_API_KEY)
 
     if not settings.TYPESAFE_API_KEY:
         state_text = json.dumps(state, ensure_ascii=False).lower()

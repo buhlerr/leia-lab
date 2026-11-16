@@ -14,3 +14,10 @@ __pycache__/
 
 # planning-with-files working plans (per-bead)
 .planning/
+
+# Execucoes locais do CLI (ids de analise e de risco, nunca texto)
+.local/
+
+# Minutas e base normativa locais: NUNCA versionar (leia-lab-ni7; lidas por LEIA_MINUTAS_DIR)
+leia-minutas-teste-mascaradas/
+leia-kb-legislacao/
