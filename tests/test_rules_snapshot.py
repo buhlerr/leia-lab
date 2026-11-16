@@ -32,7 +32,7 @@ async def seeded(pool):
 
 
 async def _run(pool, settings, text=MINUTA, name="m.txt"):
-    out = await mod.build_analyze_minuta_graph(pool, settings).ainvoke({"raw_text": text, "filename": name})
+    out = await mod.analyze(mod.build_analyze_minuta_graph(pool, settings), raw_text=text, filename=name)
     return out["analysis_id"], out
 
 
