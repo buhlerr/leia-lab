@@ -19,7 +19,7 @@ from django.contrib.auth.models import Group, User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import connection
-from django.test import TestCase, TransactionTestCase
+from django.test import SimpleTestCase, TestCase, TransactionTestCase
 from django.urls import reverse
 
 from src.management.domain.admin import reindex_chunks, run_with_pool
@@ -374,3 +374,10 @@ class SettingsTests(TestCase):
         )
         self.assertEqual(proc.stdout.strip(), "['localhost', '127.0.0.1']")
 
+
+
+class RootRedirectTests(SimpleTestCase):
+    def test_raiz_redireciona_para_o_admin(self):
+        # O SSO do Pangolin devolve para https://admin.rauvbr.com/; a raiz nao pode dar 404.
+        response = self.client.get("/")
+        self.assertRedirects(response, "/admin/", fetch_redirect_response=False)
