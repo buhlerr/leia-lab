@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Colheita da extração isolada (leia-lab-7n1)</title>
+<style>
+  :root {
+    --paper: #f5f4f0;
+    --card: #fffdf9;
+    --ink: #1d1c1a;
+    --muted: #6b675f;
+    --line: #ded8cc;
+    --red: #b42318;
+    --red-soft: #fdecea;
+    --green: #067647;
+    --green-soft: #e7f6ee;
+    --blue: #175cd3;
+    --blue-soft: #eaf1fd;
+    --amber: #b54708;
+    --amber-soft: #fff4e5;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --serif: "Iowan Old Style", "Palatino Linotype", Georgia, "Times New Roman", serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--sans); line-height: 1.6; font-size: 16px; }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 24px 72px; }
+  header { background: linear-gradient(180deg, #17211f 0%, #1f2d2a 100%); color: #f5f4f0; padding: 56px 0 44px; border-bottom: 4px solid #0f766e; }
+  header .wrap { padding-bottom: 0; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #b9c6c2; margin: 0 0 14px; }
+  h1 { font-family: var(--serif); font-weight: 600; font-size: clamp(30px, 5vw, 46px); line-height: 1.1; margin: 0 0 16px; letter-spacing: -.01em; }
+  .lede { font-size: 18px; color: #d7e0dd; max-width: 800px; margin: 0 0 26px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { font-family: var(--mono); font-size: 12px; padding: 6px 10px; border: 1px solid #3f524d; border-radius: 999px; color: #f5f4f0; background: #25332f; }
+  .chip.green { border-color: #1f5c40; background: #173a2b; color: #9be3bd; }
+  .chip.blue { border-color: #244a8a; background: #172a4a; color: #b6d0ff; }
+  .chip.amber { border-color: #7c4d12; background: #3b260c; color: #ffd9a8; }
+  main { padding-top: 44px; }
+  section { margin: 0 0 44px; }
+  h2 { font-family: var(--serif); font-weight: 600; font-size: 26px; margin: 0 0 6px; letter-spacing: -.005em; }
+  .sub { color: var(--muted); margin: 0 0 20px; max-width: 820px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; box-shadow: 0 1px 0 rgba(29,28,26,.03); }
+  .grid { display: grid; gap: 16px; }
+  .grid.two { grid-template-columns: repeat(2, 1fr); }
+  .grid.three { grid-template-columns: repeat(3, 1fr); }
+  .grid.four { grid-template-columns: repeat(4, 1fr); }
+  @media (max-width: 900px) { .grid.two, .grid.three, .grid.four { grid-template-columns: 1fr; } }
+  .verdict { border-left: 4px solid var(--line); }
+  .verdict.green { border-left-color: var(--green); }
+  .verdict.blue { border-left-color: var(--blue); }
+  .verdict.amber { border-left-color: var(--amber); }
+  .verdict h3 { margin: 0 0 6px; font-size: 17px; }
+  .verdict .id { font-family: var(--mono); font-size: 12px; color: var(--muted); display: block; margin-bottom: 4px; }
+  .verdict p { margin: 8px 0 0; font-size: 14.5px; }
+  .tag { display: inline-block; font-family: var(--mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; padding: 3px 8px; border-radius: 5px; margin-top: 12px; }
+  .tag.green { background: var(--green-soft); color: var(--green); }
+  .tag.blue { background: var(--blue-soft); color: var(--blue); }
+  .tag.amber { background: var(--amber-soft); color: var(--amber); }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); background: #f1ede4; }
+  tr:last-child td { border-bottom: none; }
+  code, .mono { font-family: var(--mono); font-size: .92em; }
+  code { background: #ece7dc; padding: 1px 5px; border-radius: 4px; }
+  pre { background: #17211f; color: #e9e4d9; padding: 18px 20px; border-radius: 12px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.65; margin: 0; }
+  pre .ok { color: #9be3bd; }
+  pre .dim { color: #9a9488; }
+  pre .amber { color: #ffd9a8; }
+  .callout { border: 1px solid #c9d7f0; background: var(--blue-soft); border-radius: 12px; padding: 14px 16px; font-size: 14.5px; color: #123b7a; }
+  .callout.warn { border-color: #f0d3a8; background: var(--amber-soft); color: #6b3b06; }
+  .metric { font-family: var(--serif); font-size: 30px; font-weight: 600; line-height: 1.1; margin: 4px 0; }
+  .metric-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 0; }
+  .small { font-size: 13.5px; color: var(--muted); }
+  .kicker { font-family: var(--mono); font-size: 12px; color: var(--muted); margin: 0 0 8px; text-transform: uppercase; letter-spacing: .05em; }
+  footer { border-top: 1px solid var(--line); margin-top: 16px; padding-top: 22px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <p class="eyebrow">leia-lab · bead leia-lab-7n1 · 2026-11-16</p>
+    <h1>Extração isolada de PDF e DOCX colhida do acornworm</h1>
+    <p class="lede">
+      Os leitores de PDF e DOCX em <code>master</code> rodavam dentro do mesmo processo sem limites de tamanho, páginas, streams ou zip-bomb. Esta entrega traz a extração em subprocesso do ramo <code>acornworm</code>, deixa de fora o renderizador Streamlit e preserva o suporte a texto puro.
+    </p>
+    <div class="chips">
+      <span class="chip green">60 + 2 testes unitários OK</span>
+      <span class="chip blue">0 novas dependências</span>
+      <span class="chip">render.py deixado de fora</span>
+      <span class="chip amber">Postgres de teste offline</span>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section>
+    <h2>1. O problema em poucas palavras</h2>
+    <p class="sub">
+      A função <code>_read_path</code> em <code>src/graphs/ingest_graph.py</code> atende tanto a ingestão da base normativa quanto a análise de minutas em <code>src/graphs/analyze_minuta_graph.py</code> e o upload no Django Admin. Antes desta mudança, um PDF ou DOCX malformado abria diretamente no processo principal sem teto de memória, sem contagem de páginas e sem extrair tabelas de arquivos Word.
+    </p>
+    <div class="grid four">
+      <div class="card">
+        <p class="metric-label">Limite upload</p>
+        <p class="metric">32 MB</p>
+        <p class="small">MAX_UPLOAD_BYTES</p>
+      </div>
+      <div class="card">
+        <p class="metric-label">Zip DOCX</p>
+        <p class="metric">64 MB</p>
+        <p class="small">MAX_DOCX_UNCOMPRESSED_BYTES</p>
+      </div>
+      <div class="card">
+        <p class="metric-label">Páginas e texto PDF</p>
+        <p class="metric">500 / 200k</p>
+        <p class="small">páginas e caracteres máximos</p>
+      </div>
+      <div class="card">
+        <p class="metric-label">Timeout processo</p>
+        <p class="metric">60 s</p>
+        <p class="small">worker isolado via stdin/stdout</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>2. Alternativas e escolhas técnicas</h2>
+    <p class="sub">
+      Durante a colheita da branch <code>buhlerr/resume-previous-work-session</code>, três decisões definiram o recorte exato desta entrega.
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Decisão</th>
+          <th>Escolha adotada</th>
+          <th>Alternativa descartada e motivo</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Roteamento em <code>_read_path</code></td>
+          <td>Desviar apenas <code>.pdf</code> e <code>.docx</code> para <code>extract_text_isolated</code>, mantendo <code>read_text(encoding="utf-8")</code> para <code>.txt</code> e <code>.md</code></td>
+          <td>Passar tudo para <code>extract_text_isolated</code> quebraria <code>.txt</code> e <code>.md</code> no Django Admin (<code>KB_SUFFIXES</code>) e nos testes do CLI, porque <code>extract_text</code> recusa extensões fora de PDF e DOCX</td>
+        </tr>
+        <tr>
+          <td><code>src/ui/render.py</code></td>
+          <td>Deixado fora do backend</td>
+          <td>Exige adicionar <code>markdown-it-py</code> ao <code>pyproject.toml</code> e foi escrito para <code>st.html</code> do Streamlit, enquanto o produto terá uma camada FE separada</td>
+        </tr>
+        <tr>
+          <td><code>src/ingest/__init__.py</code></td>
+          <td>Preservar exports de mascaramento e somar os símbolos de extração</td>
+          <td>Sobrescrever com o arquivo vazio do <code>acornworm</code> quebraria imports de <code>mask_personal_data</code> e <code>resolve_doc_alias</code></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>3. Arquivos colhidos e integrados</h2>
+    <div class="grid three">
+      <div class="card verdict green">
+        <span class="id">src/ingest/extract.py</span>
+        <h3>Validação e limites</h3>
+        <p>
+          Normaliza falhas em subclasses de <code>DocumentError</code> (<code>UnsupportedFileError</code>, <code>InvalidDocumentError</code>, <code>EmptyDocumentError</code>, <code>DocumentTooLargeError</code>) sem vazar texto do contrato em mensagens de erro.
+        </p>
+        <span class="tag green">pypdf + python-docx já no projeto</span>
+      </div>
+      <div class="card verdict blue">
+        <span class="id">src/ingest/isolated.py + worker.py</span>
+        <h3>Isolamento em subprocesso</h3>
+        <p>
+          Envia bytes brutos via <code>stdin.buffer</code> para <code>python -m src.ingest.worker</code> e lê JSON UTF-8 de <code>stdout.buffer</code>, evitando escrita temporária em disco e bloqueando arquivos patológicos por timeout.
+        </p>
+        <span class="tag blue">sem texto em args ou logs</span>
+      </div>
+      <div class="card verdict amber">
+        <span class="id">src/graphs/ingest_graph.py</span>
+        <h3>Ponte única para grafos e Admin</h3>
+        <p>
+          Como <code>analyze_minuta_graph.py</code> e <code>admin.py</code> dependem de <code>_read_path</code>, a proteção entrou de forma transparente antes do mascaramento com zero mudança de assinatura pública.
+        </p>
+        <span class="tag amber">3 novos testes em test_isolated.py</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>4. Provas reais executadas</h2>
+    <p class="sub">
+      Execução realizada após o commit <code>522092d</code> na branch <code>feat/harvest-extract-isolated</code>.
+    </p>
+    <div class="grid two">
+      <div class="card">
+        <p class="kicker">Suíte unitária sem banco</p>
+        <pre>uv run pytest tests/test_extract.py tests/test_isolated.py \
+  tests/test_masking.py tests/test_minuta_rules.py \
+  tests/test_db_guard.py tests/test_deploy_image.py \
+  tests/test_gold.py tests/test_clients.py -k "not pool" -rs
+
+<span class="ok">60 passed, 1 skipped, 13 warnings in 3.67s</span>
+<span class="dim">SKIPPED: tests/test_gold.py:155 (local masked minutas not configured)</span></pre>
+      </div>
+      <div class="card">
+        <p class="kicker">Invariante de privacidade e compilação</p>
+        <pre>uv run pytest tests/test_ingest_privacy.py -k "no_graph_in_the_repo"
+<span class="ok">2 passed, 6 deselected in 1.38s</span>
+
+uv run python -m py_compile src/ingest/extract.py ... tests/test_isolated.py
+<span class="ok">exit code 0</span></pre>
+      </div>
+    </div>
+    <div class="callout warn" style="margin-top:16px">
+      <strong>Limitação registrada.</strong> O Postgres local de teste na porta 5433 não estava ativo nesta estação, portanto os testes que dependem da fixture <code>pool</code> (como <code>test_ingest_graph.py</code> e o restante de <code>test_ingest_privacy.py</code>) não rodaram aqui.
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      Artefato gerado em 2026-11-16 em <code>docs/reviews/2026-11-16-colheita-extracao-acornworm.html</code> para a bead <code>leia-lab-7n1</code>.
+    </p>
+  </footer>
+
+</main>
+</body>
+</html>

@@ -19,6 +19,7 @@ import asyncpg
 from langgraph.graph import END, START, StateGraph
 
 from src.config import Settings
+from src.ingest.isolated import extract_text_isolated
 from src.ingest.masking import mask_personal_data, resolve_doc_alias, split_contract_text
 from src.rag.embeddings import embed_text
 from src.rag.hybrid_search import _to_pgvector_literal
@@ -40,15 +41,8 @@ class IngestState(TypedDict, total=False):
 
 
 def _read_path(path: Path) -> str:
-    suffix = path.suffix.lower()
-    if suffix == ".pdf":
-        from pypdf import PdfReader
-
-        return "\n".join((page.extract_text() or "") for page in PdfReader(str(path)).pages)
-    if suffix == ".docx":
-        import docx
-
-        return "\n".join(p.text for p in docx.Document(str(path)).paragraphs)
+    if path.suffix.lower() in {".pdf", ".docx"}:
+        return extract_text_isolated(path.name, path.read_bytes())
     return path.read_text(encoding="utf-8")
 
 
