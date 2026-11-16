@@ -1,0 +1,95 @@
+{
+  "version": 1,
+  "note": "Prototype labels by the foundation worker (bead leia-lab-1g1.9), NOT lawyer-validated. Expected ids refer to the 6 default risks (R-01..R-06). Clause numbers are segment_clauses() over the MASKED minuta. No minuta text is stored here.",
+  "minutas": {
+    "locacao-01.txt": {
+      "sha256": "60af5bad5f65cbc1cc408c1e2c1f1b6d44e7481d5ca5e8ecda923d6d57ce2869"
+    },
+    "locacao-02.txt": {
+      "sha256": "4211389a7df5d9d47755a4fbb8e2e48adbff952b076cd85aff5230f55289dc0b"
+    },
+    "locacao-06.txt": {
+      "sha256": "4b8091bedeeddf8211756586bfb58e95cb95147e95ebe8efb6b5f48815d3a463"
+    }
+  },
+  "clauses": [
+    {
+      "id": "g01",
+      "file": "locacao-01.txt",
+      "clause_n": 6,
+      "clause_sha256": "0db26a1893befdacb94eb5b5fd3c0d3ae5a407d666484b397383bf84364c4935",
+      "expected": []
+    },
+    {
+      "id": "g02",
+      "file": "locacao-01.txt",
+      "clause_n": 11,
+      "clause_sha256": "0b958083ea72625e8999cc4deff6b3d0d9837333aa4bbdea4e7060160469abb3",
+      "expected": [
+        "R-03"
+      ]
+    },
+    {
+      "id": "g03",
+      "file": "locacao-01.txt",
+      "clause_n": 17,
+      "clause_sha256": "189fe1ade320f9cdd8baf066bb6e6b1ac7e0476bb8cf271ae760459984c28ace",
+      "expected": [
+        "R-04"
+      ]
+    },
+    {
+      "id": "g04",
+      "file": "locacao-02.txt",
+      "clause_n": 5,
+      "clause_sha256": "0e6e4f72011ef63a9a5e5f16eb345fe420de4a6d53e02962581e3981603c33c9",
+      "expected": []
+    },
+    {
+      "id": "g05",
+      "file": "locacao-02.txt",
+      "clause_n": 6,
+      "clause_sha256": "0d2f08fceeffc21bae4920d4e5098f1051452d83a25ed18739285493e39d0d40",
+      "expected": []
+    },
+    {
+      "id": "g06",
+      "file": "locacao-02.txt",
+      "clause_n": 10,
+      "clause_sha256": "6ac6edce8c338e12608f9c8ee245242d5756525c7a823bd0478aeee11f8348dc",
+      "expected": []
+    },
+    {
+      "id": "g07",
+      "file": "locacao-02.txt",
+      "clause_n": 11,
+      "clause_sha256": "6682b5387872ea0f1363a5e60cb481cc4b59d7b149c721b092c2cc698266c1c9",
+      "expected": []
+    },
+    {
+      "id": "g08",
+      "file": "locacao-06.txt",
+      "clause_n": 5,
+      "clause_sha256": "d9725c805c01aa83938d535cf46cd585071d9b5431077127ab2ea7ee094f2a79",
+      "expected": []
+    },
+    {
+      "id": "g09",
+      "file": "locacao-06.txt",
+      "clause_n": 8,
+      "clause_sha256": "ced270c81f889b8f58500cc582bb4ce8a57bdb3a919d9ae2564eb23ce2ef296a",
+      "expected": [
+        "R-02"
+      ]
+    },
+    {
+      "id": "g10",
+      "file": "locacao-06.txt",
+      "clause_n": 14,
+      "clause_sha256": "efa0cf62d6654a83edd88af95d45b18b76fc252589bc38b059c60657ed1a592d",
+      "expected": [
+        "R-03"
+      ]
+    }
+  ]
+}
