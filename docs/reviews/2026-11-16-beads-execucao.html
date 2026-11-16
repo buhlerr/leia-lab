@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quatro beads, uma ordem: o que foi executado</title>
+<style>
+  :root {
+    --paper: #f5f4f0;
+    --card: #fffdf9;
+    --ink: #1d1c1a;
+    --muted: #6b675f;
+    --line: #ded8cc;
+    --red: #b42318;
+    --red-soft: #fdecea;
+    --green: #067647;
+    --green-soft: #e7f6ee;
+    --blue: #175cd3;
+    --blue-soft: #eaf1fd;
+    --amber: #b54708;
+    --amber-soft: #fff4e5;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --serif: "Iowan Old Style", "Palatino Linotype", Georgia, "Times New Roman", serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--sans); line-height: 1.6; font-size: 16px; }
+  .wrap { max-width: 1060px; margin: 0 auto; padding: 0 24px 72px; }
+  header { background: linear-gradient(180deg, #17211f 0%, #1f2d2a 100%); color: #f5f4f0; padding: 56px 0 44px; border-bottom: 4px solid #0f766e; }
+  header .wrap { padding-bottom: 0; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: #b9c6c2; margin: 0 0 14px; }
+  h1 { font-family: var(--serif); font-weight: 600; font-size: clamp(30px, 5vw, 48px); line-height: 1.08; margin: 0 0 16px; letter-spacing: -.01em; }
+  .lede { font-size: 18px; color: #d7e0dd; max-width: 780px; margin: 0 0 26px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip { font-family: var(--mono); font-size: 12px; padding: 6px 10px; border: 1px solid #3f524d; border-radius: 999px; color: #f5f4f0; background: #25332f; }
+  .chip.red { border-color: #7a2a22; background: #3a1d19; color: #ffb4ab; }
+  .chip.green { border-color: #1f5c40; background: #173a2b; color: #9be3bd; }
+  .chip.blue { border-color: #244a8a; background: #172a4a; color: #b6d0ff; }
+  main { padding-top: 44px; }
+  section { margin: 0 0 44px; }
+  h2 { font-family: var(--serif); font-weight: 600; font-size: 26px; margin: 0 0 6px; letter-spacing: -.005em; }
+  .sub { color: var(--muted); margin: 0 0 20px; max-width: 800px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; box-shadow: 0 1px 0 rgba(29,28,26,.03); }
+  .grid { display: grid; gap: 16px; }
+  .grid.two { grid-template-columns: repeat(2, 1fr); }
+  .grid.four { grid-template-columns: repeat(4, 1fr); }
+  @media (max-width: 900px) { .grid.two, .grid.four { grid-template-columns: 1fr; } }
+  .verdict { border-left: 4px solid var(--line); }
+  .verdict.red { border-left-color: var(--red); }
+  .verdict.green { border-left-color: var(--green); }
+  .verdict.blue { border-left-color: var(--blue); }
+  .verdict.amber { border-left-color: var(--amber); }
+  .verdict h3 { margin: 0 0 4px; font-size: 17px; }
+  .verdict .id { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+  .verdict p { margin: 10px 0 0; font-size: 14.5px; }
+  .tag { display: inline-block; font-family: var(--mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; padding: 3px 8px; border-radius: 5px; margin-top: 12px; }
+  .tag.red { background: var(--red-soft); color: var(--red); }
+  .tag.green { background: var(--green-soft); color: var(--green); }
+  .tag.blue { background: var(--blue-soft); color: var(--blue); }
+  .tag.amber { background: var(--amber-soft); color: var(--amber); }
+  table { width: 100%; border-collapse: collapse; font-size: 14.5px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); background: #f1ede4; }
+  tr:last-child td { border-bottom: none; }
+  code, .mono { font-family: var(--mono); font-size: .92em; }
+  code { background: #ece7dc; padding: 1px 5px; border-radius: 4px; }
+  pre { background: #17211f; color: #e9e4d9; padding: 18px 20px; border-radius: 12px; overflow-x: auto; font-family: var(--mono); font-size: 13px; line-height: 1.65; margin: 0; }
+  pre .ok { color: #9be3bd; }
+  pre .dim { color: #9a9488; }
+  pre .red { color: #ffb4ab; }
+  .flow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  @media (max-width: 900px) { .flow { grid-template-columns: 1fr; } }
+  .step { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 14px 12px; position: relative; }
+  .step .n { font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: .06em; }
+  .step strong { display: block; margin: 6px 0 4px; font-size: 14px; }
+  .step span { display: block; font-size: 12.5px; color: var(--muted); }
+  .step::after { content: "→"; position: absolute; right: -14px; top: 50%; transform: translateY(-50%); color: #b8b1a3; font-size: 18px; }
+  .step:last-child::after { content: none; }
+  @media (max-width: 900px) { .step::after { content: none; } }
+  .callout { border: 1px solid #c9d7f0; background: var(--blue-soft); border-radius: 12px; padding: 14px 16px; font-size: 14px; color: #123b7a; }
+  .callout.warn { border-color: #f0d3a8; background: var(--amber-soft); color: #6b3b06; }
+  .files { display: grid; gap: 10px; }
+  .file { display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: baseline; padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+  .file .path { font-family: var(--mono); font-size: 13px; }
+  .file .why { grid-column: 1 / -1; font-size: 13.5px; color: var(--muted); margin-top: -4px; }
+  .badge { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; padding: 3px 8px; border-radius: 5px; white-space: nowrap; }
+  .badge.new { background: var(--green-soft); color: var(--green); }
+  .badge.edit { background: var(--blue-soft); color: var(--blue); }
+  footer { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 22px; color: var(--muted); font-size: 13px; }
+  .kicker { font-family: var(--mono); font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+  .small { font-size: 13px; color: var(--muted); }
+  .quote { border-left: 3px solid var(--line); padding: 2px 0 2px 14px; color: #4b4740; font-style: italic; margin: 10px 0 0; font-size: 14px; }
+  .metric { font-family: var(--serif); font-size: 30px; font-weight: 600; line-height: 1.1; }
+  .metric-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <p class="eyebrow">Beads · 2026-11-16 · execução em ordem</p>
+    <h1>Quatro beads, uma ordem</h1>
+    <p class="lede">
+      A fila tinha quatro itens abertos e nenhum bloqueio. Executei na ordem que fecha o ciclo curto primeiro,
+      prova o dado de produção depois, corrige a busca densa e deixa o spike de MLflow por último.
+    </p>
+    <div class="chips">
+      <span class="chip red">R007 vermelho</span>
+      <span class="chip green">0 vetores offline</span>
+      <span class="chip blue">iterative_scan</span>
+      <span class="chip green">MLflow 0.612</span>
+      <span class="chip">30 passed · 1 skipped</span>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <section>
+    <h2>A ordem e o porquê</h2>
+    <div class="flow">
+      <div class="step"><span class="n">01 · q3t</span><strong>Confirmar R007</strong><span>Caso limpo e v3</span></div>
+      <div class="step"><span class="n">02 · 8iq</span><strong>Auditar chunks</strong><span>Vetor offline disfarçado</span></div>
+      <div class="step"><span class="n">03 · y1h</span><strong>Corrigir HNSW</strong><span>Filtro e fome de candidatos</span></div>
+      <div class="step"><span class="n">04 · 1em</span><strong>Spike MLflow</strong><span>Scorer e privacidade</span></div>
+    </div>
+    <p class="sub" style="margin-top:16px">
+      A `q3t` não toca em dados de produção e fecha o assunto da matriz. A `8iq` é leitura pura no banco real e decide
+      se há o que corrigir. A `y1h` depende do corpus. A `1em` é independente e foi a última porque é spike, não correção.
+    </p>
+  </section>
+
+  <section>
+    <h2>01 · R007 confirmado e v3 aplicada</h2>
+    <p class="sub">
+      O parecer pedia vermelho para o `R007`, mas o alerta original apontava a cláusula errada. A própria matriz diz que
+      o risco aparece na locacao-01. A cláusula 1 é o cabeçalho com partes, endereço, datas e aluguel em branco.
+    </p>
+    <div class="grid two">
+      <div class="card verdict red">
+        <span class="id">locacao-01 · cláusula 1</span>
+        <h3>O caso limpo</h3>
+        <p class="quote">“LOCADOR , ... LOCATÁRIO IMÓVEL Endereço: (COD. IMÓVEL ) ... PRAZO DA LOCAÇÃO TRINTA MESES, com início em e término em . ALUGUEL MENSAL ( )”</p>
+        <span class="tag red">R007 aplica</span>
+      </div>
+      <div class="card">
+        <p class="kicker">prova de ponta a ponta</p>
+        <pre><span class="dim">analysis</span> 129c9081 <span class="dim">· 17:50</span>
+<span class="dim">matrix</span> v3 · 184 ativos
+<span class="dim">R007</span> <span class="red">red</span> · cláusula 1
+<span class="dim">snapshot</span> R007 <span class="red">vermelho</span></pre>
+        <p class="small" style="margin:12px 0 0">A v2 não foi reescrita. A v3 entra por upsert e o `R007` muda na mesma linha.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>02 · Nenhum vetor offline disfarçado</h2>
+    <p class="sub">
+      A dúvida era se chunks antigos guardavam hash offline com o rótulo do modelo real. A auditoria olhou o banco
+      inteiro e recomputou o hash determinístico de cada chunk para comparar com o vetor gravado.
+    </p>
+    <div class="grid four">
+      <div class="card"><p class="metric-label">chunks</p><p class="metric">396</p><p class="small">todos base-normativa/v1</p></div>
+      <div class="card"><p class="metric-label">modelo</p><p class="metric" style="font-size:20px">text-embedding-3-small</p><p class="small">rótulo real</p></div>
+      <div class="card"><p class="metric-label">NULL</p><p class="metric">0</p><p class="small">sem procedência</p></div>
+      <div class="card"><p class="metric-label">offline disfarçado</p><p class="metric" style="color:var(--green)">0</p><p class="small">hash recomputado</p></div>
+    </div>
+    <div class="callout" style="margin-top:16px">
+      Não há linha legada no `leia_lab`. Nada foi reindexado nem apagado. O corpus foi criado hoje, depois da correção.
+    </div>
+  </section>
+
+  <section>
+    <h2>03 · O filtro de modelo no HNSW</h2>
+    <p class="sub">
+      O HNSW aplica o filtro `embedding_model = $6` depois da varredura. Num corpus misto, uma varredura de
+      `ef_search=40` pode devolver menos que o `candidate_limit`. A correção usa `hnsw.iterative_scan`.
+    </p>
+    <div class="grid two">
+      <div class="card">
+        <p class="kicker">mudança</p>
+        <pre><span class="ok">async with pool.acquire() as conn, conn.transaction():
+    await conn.execute(
+        "SET LOCAL hnsw.iterative_scan = relaxed_order"
+    )
+    rows = await conn.fetch(HYBRID_SEARCH_SQL, ...)</span></pre>
+        <p class="small" style="margin:12px 0 0">pgvector 0.8.7 nesta instância. Versão antiga ignora o ajuste. Corpus de um modelo não muda.</p>
+      </div>
+      <div class="card">
+        <p class="kicker">sonda</p>
+        <pre><span class="dim">2000 offline + 5 reais</span>
+candidatos, iterative_scan off: <span class="ok">5</span>
+candidatos, relaxed_order:      <span class="ok">5</span>
+<span class="dim">sem regressao na sonda</span></pre>
+        <p class="small" style="margin:12px 0 0">A sonda não reproduziu a fome com 2.000 linhas, mas o corpus real é single-model. O teste de procedência segue passando.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>04 · MLflow GenAI como caminho de saída</h2>
+    <p class="sub">
+      Spike descartável em venv separado, servidor SQLite e um `@scorer` embrulhando o `score()` real. O objetivo era
+      ver se MLflow substitui a LangSmith sem perder nota nem privacidade.
+    </p>
+    <div class="grid three">
+      <div class="card"><p class="metric-label">P / R / F1</p><p class="metric">0.682 · 0.556 · 0.612</p><p class="small">idêntico ao CLI</p></div>
+      <div class="card"><p class="metric-label">texto cru no store</p><p class="metric" style="color:var(--green)">não</p><p class="small">nome, CPF e RG ausentes</p></div>
+      <div class="card"><p class="metric-label">footprint</p><p class="metric">1 MB</p><p class="small">DB após uma avaliação</p></div>
+    </div>
+    <div class="grid two" style="margin-top:16px">
+      <div class="card">
+        <p class="kicker">o que apareceu no store</p>
+        <pre><span class="dim">raw name / CPF / RG</span>  <span class="red">False</span> <span class="red">False</span> <span class="red">False</span>
+<span class="dim">masked [NOME] [CPF]</span> <span class="ok">True</span>  <span class="ok">True</span>
+<span class="dim">autolog numa RunnableLambda</span>
+<span class="dim">raw sentinel</span> <span class="red">False</span>
+<span class="dim">masked tokens</span> <span class="ok">True</span></pre>
+      </div>
+      <div class="card">
+        <p class="kicker">custo medido</p>
+        <ul class="small" style="margin:8px 0 0; padding-left:18px">
+          <li>MLflow 3.18.0, instalação em 21 s</li>
+          <li>Venv com projeto + MLflow: 588,3 MB</li>
+          <li>Artifact store vazio</li>
+          <li>Sem Redis, S3 ou ClickHouse</li>
+          <li>Backend Postgres não medido</li>
+        </ul>
+      </div>
+    </div>
+    <div class="callout warn" style="margin-top:16px">
+      O autolog foi provado numa cadeia mínima, não no grafo Leia completo. A decisão é manter a LangSmith agora.
+      O MLflow fica como caminho de saída self-host, com um teste dedicado de privacidade no grafo antes da troca.
+    </div>
+  </section>
+
+  <section>
+    <h2>Testes e estado final</h2>
+    <div class="grid two">
+      <div class="card">
+        <p class="kicker">suíte relevante</p>
+        <h3 style="margin:0 0 6px">30 passed, 1 skipped</h3>
+        <p class="small" style="margin:0"><code>test_data_versions.py</code>, <code>test_embeddings_provenance.py</code> e <code>test_gold.py</code>, com o banco descartável.</p>
+      </div>
+      <div class="card">
+        <p class="kicker">beads</p>
+        <h3 style="margin:0 0 6px">4 fechadas</h3>
+        <p class="small" style="margin:0">`q3t`, `8iq`, `y1h` e `1em`. Nenhuma bloqueada. O caminho de saída do MLflow ficou documentado na pesquisa 10.5.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Próximo passo</h2>
+    <div class="callout">
+      A fila está vazia. O que resta é decisão de produto: adotar MLflow só quando a LangSmith ficar cara ou
+      inaceitável por LGPD. Até lá, a matriz v3 e a busca densa estão no estado que os testes provam.
+    </div>
+  </section>
+
+  <footer>
+    <p>
+      Artefato gerado em 2026-11-16 para a execução das beads `leia-lab-q3t`, `leia-lab-8iq`, `leia-lab-y1h` e `leia-lab-1em`.
+      Resultado detalhado do MLflow em <code>docs/research/2026-11-framework-evaluation.md</code>, seção 10.5.
+    </p>
+    <p class="small">A v1 e a v2 continuam no ledger. Nada foi apagado. O banco real segue com 184 riscos ativos.</p>
+  </footer>
+
+</main>
+</body>
+</html>

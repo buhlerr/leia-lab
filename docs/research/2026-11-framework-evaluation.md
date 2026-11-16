@@ -358,4 +358,14 @@ O painel de gestão e o rastreio são **independentes do motor** (dados em Postg
 2. **Volume e retenção** de traços: sem medição equivalente à da B3 (~108 spans/análise, 1 traço raiz por análise), não dá para dimensionar backend store nem política de limpeza.
 3. **Licença**: arquivo `LICENSE` do repositório não reconferido nesta rodada; as páginas lidas falam em "open source" e Linux Foundation.
 4. **Permissões**: *workspaces* exigem backend SQL [F], mas RBAC fino (por experimento, não por workspace) **não verificado**.
-5. **Nenhum comportamento executado** — toda a seção é documentação, como a rodada original; os números da LangSmith (margem, esforço) continuam sendo os únicos medidos.
+5. **Nenhum comportamento executado** — as seções 10.1 a 10.4 são documentação, como a rodada original. O spike local de 10.5 executou o caminho de avaliação e de privacidade.
+
+### 10.5 Resultado do spike local (2026-11-16)
+
+Spike descartável, sem tocar no venv do projeto nem no `leia_lab`.
+
+- **Scorer.** MLflow 3.18.0 em venv separado. `@scorer` embrulhando `score()` sobre a rodada `gold-v3-matriz-v2` produziu P=0.682, R=0.556, F1=0.612, idêntico ao CLI.
+- **Privacidade.** Uma sentinela crua (nome, CPF e RG) foi mascarada antes de entrar no payload. A sentinela não aparece no store do MLflow, nem após `evaluate`, nem após `mlflow.langchain.autolog()` numa `RunnableLambda`; os tokens `[NOME]` e `[CPF]` aparecem.
+- **Operação.** Servidor com SQLite, sem Redis, S3 ou ClickHouse. O banco ficou em 1 MB depois de uma avaliação; o artifact store ficou vazio; o venv com projeto e MLflow somou 588,3 MB; a instalação do MLflow levou 21 s.
+- **Limites.** O autolog foi testado numa cadeia mínima, não no grafo Leia completo. O backend Postgres não foi medido. Volume e retenção de traços continuam sem medição.
+- **Decisão.** Mantém a LangSmith agora. O MLflow fica como caminho de saída self-host, com a ressalva de que a privacidade do autolog no grafo precisa de um teste dedicado antes da troca.
