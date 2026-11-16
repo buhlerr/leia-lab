@@ -9,6 +9,7 @@ from __future__ import annotations
 import datetime
 import json
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -157,13 +158,61 @@ DEFAULT_TEMA_MAP: dict[str, list[str]] = {
 }
 
 
+def citacao_de(norma: str, artigo: Any = None) -> str:
+    """``{norma, artigo}`` da matriz real -> a citacao usada no relatorio e como titulo na base."""
+    art = str(artigo or "").strip()
+    return f"{norma.strip()}, art. {art}" if art else norma.strip()
+
+
+def norm_slug(citacao: str) -> str:
+    """Id estavel de uma citacao: ``Lei 8.245/1991, art. 35`` -> ``lei-8245-1991-art-35``."""
+    s = unicodedata.normalize("NFKD", citacao).encode("ascii", "ignore").decode()
+    s = re.sub(r"(?<=\d)\.(?=\d)", "", s)  # 8.245 -> 8245, como nos ids da base normativa
+    return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
+
+
+def normalize_norm(
+    n: Any, *, risk_id: str = "?", kb_ids: dict[str, str] | None = None
+) -> dict[str, Any]:
+    """Uma norma da matriz -> ``{"id", "citacao", ...extras}`` (bead leia-lab-vz3).
+
+    Aceita os dois formatos: ``{citacao, id?}`` (padrao) e ``{norma, artigo, status, por_que}``
+    (matriz real). Os extras ficam. ``kb_ids`` (citacao -> id na base normativa) da o id da
+    base quando a norma tem texto la. Norma que nao da para mapear LEVANTA erro: antes ela era
+    descartada em silencio e todo risco vermelho caia para amarelo.
+    """
+    if not isinstance(n, dict):
+        raise ValueError(f"risco {risk_id}: norma nao e objeto")
+    if n.get("citacao"):
+        citacao = str(n["citacao"]).strip()
+    elif n.get("norma"):
+        citacao = citacao_de(n["norma"], n.get("artigo"))
+    else:
+        raise ValueError(f"risco {risk_id}: norma sem 'citacao' nem 'norma' (chaves={sorted(n)})")
+    out = {k: v for k, v in n.items() if k not in {"id", "citacao"}}
+    out["id"] = n.get("id") or (kb_ids or {}).get(citacao) or norm_slug(citacao)
+    out["citacao"] = citacao
+    return out
+
+
+def parse_matrix_line(r: dict[str, Any], kb_ids: dict[str, str] | None = None) -> dict[str, Any]:
+    """Uma linha do JSONL da matriz -> risco no formato do grafo (``id, risco, cor, parte, normas``)."""
+    return {
+        "id": r["id"],
+        "risco": r["risco"],
+        "cor": r["criticidade_sugerida"],
+        "parte": r["parte_prejudicada"],
+        "normas": [normalize_norm(n, risk_id=r["id"], kb_ids=kb_ids) for n in r.get("normas", [])],
+    }
+
+
 def load_risk_matrix(
     matrix_path: Path | None = None,
 ) -> tuple[list[str], dict[str, list[dict[str, Any]]], dict[str, list[str]]]:
     """Carrega ``(temas, riscos, tema_map)`` de um JSONL; sem arquivo, usa o padrão embutido.
 
-    Cada linha: ``id``, ``tema``, ``risco``, ``criticidade_sugerida``,
-    ``parte_prejudicada`` e ``normas`` (``[{"id"?, "citacao"?}]``).
+    Cada linha: ``id``, ``tema``, ``risco``, ``criticidade_sugerida``, ``parte_prejudicada`` e
+    ``normas`` (``{citacao, id?}`` ou ``{norma, artigo, ...}``; ver ``normalize_norm``).
     """
     if matrix_path is None or not Path(matrix_path).is_file():
         return list(DEFAULT_TEMAS), {k: list(v) for k, v in DEFAULT_RISCOS.items()}, {
@@ -175,22 +224,10 @@ def load_risk_matrix(
         if not line.strip():
             continue
         r = json.loads(line)
-        normas = [
-            {"id": n.get("id") or n["citacao"], "citacao": n["citacao"]}
-            for n in r.get("normas", [])
-            if isinstance(n, dict) and n.get("citacao")
-        ]
-        riscos.setdefault(r["tema"], []).append(
-            {
-                "id": r["id"],
-                "risco": r["risco"],
-                "cor": r["criticidade_sugerida"],
-                "parte": r["parte_prejudicada"],
-                "normas": normas,
-            }
-        )
+        risco = parse_matrix_line(r)
+        riscos.setdefault(r["tema"], []).append(risco)
         ids = tema_map.setdefault(r["tema"], [])
-        for n in normas:
+        for n in risco["normas"]:
             if n["id"] not in ids:
                 ids.append(n["id"])
     return sorted(riscos), riscos, tema_map
@@ -270,7 +307,8 @@ def validate_and_format(doc_state: dict[str, Any]) -> tuple[str, dict[str, Any],
                     w = {}
                 cor = _COR.get(x["cor"], "yellow")
                 basis = [n["citacao"] for n in x.get("normas", [])]
-                if not basis and cor == "red":
+                rebaixado = not basis and cor == "red"
+                if rebaixado:
                     cor = "yellow"
                     ajustes["rebaixados_sem_norma"] += 1
                 trecho = w.get("trecho") or ""
@@ -297,6 +335,11 @@ def validate_and_format(doc_state: dict[str, Any]) -> tuple[str, dict[str, Any],
                         "clause_index": cl["n"],
                         "confirmation_score": x.get("noul"),
                         "writer_disagrees": bool(w.get("discorda")),
+                        **(
+                            {"downgraded": "vermelho -> amarelo: o risco nao tem norma na matriz que o fundamente"}
+                            if rebaixado
+                            else {}
+                        ),
                     }
                 )
             reg(cl, "alerta", sorted(cores, key=_ORDEM.__getitem__)[0], {"riscos": [x["id"] for x in conf]})

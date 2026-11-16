@@ -1,0 +1,23 @@
+{
+  "versao": "v1",
+  "arquivos": {
+    "cdc-1990.jsonl": "b47e921bbdb7e481354e1c1fe19b098e29261dbb4faf81a1c2586a0628d65614",
+    "codigo-civil-2002.jsonl": "57029bcb617cbc549509c38097ab5106e302a816f3fc20712a6bb424d83f5873",
+    "cpc-2015.jsonl": "f358987d4954bb1428d062edc1d0e436c6f63046dd57e80adb1ae56219368bf8",
+    "jurisprudencia.jsonl": "9dd881e486ab6e274e895bd9febbc8242fbedac503c7bcdf645b506db4cc99c4",
+    "lei-10192-2001.jsonl": "42f85f76e5f3b1b387e157db60fe49fa833bb45c54f324d670083f7cb1d99c1f",
+    "lei-15040-2024.jsonl": "f0ca32ce730a592cea0d5d3456520bd4c55b47a1b34e8f1dabbda6b08e6c3140",
+    "lei-8009-1990.jsonl": "9daf21b858e000118eabc4a6817fd7fac90e5d94e8d4b7a6bd853e58817dcef1",
+    "lei-8245-1991.jsonl": "c442db83f6e45bde0584003ff6cbd2101957ca6fc28e524c570a89127f2b602a",
+    "lei-9307-1996.jsonl": "9a708a7851d346b8ad628b315c02741473314c70131d5e6e6da70163e8a2594b",
+    "lei-9514-1997.jsonl": "b24582512f2f8d2729391b569ca4422c5a3b718b426a016b1323a6c5226ea589",
+    "lgpd-2018.jsonl": "a0c64f379504d76098102c99890a86acd8dc0291359e8732d93e9dda36311787",
+    "sumulas-stj.jsonl": "2ae25cbcd67ceccb553e2a1c7d37c481bcf8ed299b6974ed3180f94ca94eb0cb"
+  },
+  "origem": {
+    "repo": "buhlerr/leia-kb-legislacao",
+    "commit": "08ab98d",
+    "caminho": "saida/"
+  },
+  "aviso": "Dados de apoio a analise juridica, NAO validados por advogado. Revisao humana obrigatoria."
+}

@@ -148,6 +148,20 @@ CREATE OR REPLACE TRIGGER domain_history_append_only
 CREATE OR REPLACE TRIGGER domain_history_no_truncate
     BEFORE TRUNCATE ON domain_history FOR EACH STATEMENT EXECUTE FUNCTION forbid_change();
 
+-- ---------------------------------------------------------------- versoes de dados aplicadas
+-- Ledger append-only: cada versao de dado do repo (data/matriz/v1, data/base-normativa/v1...)
+-- entra no banco uma vez so, com o sha256 conferido. Depois disso o banco e a fonte da verdade.
+CREATE TABLE IF NOT EXISTS data_versions (
+    name TEXT PRIMARY KEY,           -- ex.: matriz/v1
+    sha256 TEXT NOT NULL,
+    applied_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
+    db_user TEXT NOT NULL DEFAULT session_user
+);
+CREATE OR REPLACE TRIGGER data_versions_append_only
+    BEFORE UPDATE OR DELETE ON data_versions FOR EACH ROW EXECUTE FUNCTION forbid_change();
+CREATE OR REPLACE TRIGGER data_versions_no_truncate
+    BEFORE TRUNCATE ON data_versions FOR EACH STATEMENT EXECUTE FUNCTION forbid_change();
+
 -- ---------------------------------------------------------------- analyses + trilha + snapshot
 CREATE TABLE IF NOT EXISTS analyses (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -212,6 +226,7 @@ CREATE OR REPLACE TRIGGER analysis_trail_no_truncate
 GRANT USAGE ON SCHEMA public TO leia_app;
 GRANT SELECT, INSERT, UPDATE, DELETE ON minuta_types, themes, risk_matrix, prompts TO leia_app;
 GRANT SELECT ON domain_history TO leia_app;                 -- sem escrita no historico
+GRANT SELECT ON data_versions TO leia_app;                  -- aplicar versao de dado e tarefa de operacao (dono do schema)
 GRANT SELECT, INSERT, UPDATE ON analyses TO leia_app;       -- sem DELETE; snapshot congelado por gatilho
 GRANT SELECT, INSERT ON analysis_trail TO leia_app;         -- sem UPDATE/DELETE
 GRANT SELECT, INSERT, UPDATE, DELETE ON kb_docs, kb_chunks TO leia_app;

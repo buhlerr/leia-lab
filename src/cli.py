@@ -2,6 +2,9 @@
 
 Comandos:
 * ``init``: aplica o schema e o seed padrao (idempotente).
+* ``init --real``: idem + base normativa e matriz real versionadas em ``data/`` (Q5; idempotente,
+  retomavel). Indexar a base gera embeddings (pago com OPENROUTER_API_KEY).
+* ``data-versions``: versoes de dados ja aplicadas no banco.
 * ``analyze <arquivo>``: uma analise; o arquivo e lido e mascarado localmente.
 * ``gold-run --label X``: analisa as minutas do gabarito (LEIA_MINUTAS_DIR) e mede P/R/F1.
 * ``gold-compare A B``: compara duas rodadas rotuladas (ex.: antes e depois de editar a matriz).
@@ -24,8 +27,10 @@ import asyncpg
 from src.config import Settings
 from src.db.connection import init_db
 from src.db.seed import seed_defaults
+from src.db.versions import applied_versions, apply_base, apply_matrix
 from src.eval import gold as G
 from src.graphs.analyze_minuta_graph import analyze, build_analyze_minuta_graph
+from src.graphs.ingest_graph import build_ingest_graph, ingest
 
 RUNS_DIR = Path(".local") / "gold-runs"  # ignorado pelo git; so ids de analise
 
@@ -82,6 +87,17 @@ async def _main(args: argparse.Namespace) -> None:
             if args.cmd == "init":
                 await init_db(pool)
                 print("seed aplicado:", await seed_defaults(pool))
+                if args.real:
+                    graph = build_ingest_graph(pool, settings)
+
+                    async def ingest_fn(texto: str, citacao: str, source: str) -> None:
+                        await ingest(graph, raw_text=texto, doc_name=citacao, source=source)
+
+                    print("base normativa: artigos indexados agora =", await apply_base(pool, ingest_fn, args.versao))
+                    print("matriz aplicada:", await apply_matrix(pool, args.versao, base_version=args.versao))
+            elif args.cmd == "data-versions":
+                for name, sha in (await applied_versions(pool)).items():
+                    print(f"{name} {sha[:12]}")
             elif args.cmd == "analyze":
                 out = await analyze(build_analyze_minuta_graph(pool, settings), file_path=args.file)
                 alerts = sorted({(x["risk_id"], x["severity"]) for x in out["report_envelope"]["content"]["alerts"]})
@@ -110,7 +126,10 @@ async def _main(args: argparse.Namespace) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(prog="python -m src.cli")
     sub = p.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("init", help="aplica o schema e o seed padrao (idempotente)")
+    i = sub.add_parser("init", help="aplica o schema e o seed padrao (idempotente)")
+    i.add_argument("--real", action="store_true", help="aplica tambem a base normativa e a matriz real de data/")
+    i.add_argument("--versao", default="v1", help="versao dos dados de data/ (padrao v1)")
+    sub.add_parser("data-versions", help="versoes de dados ja aplicadas no banco")
     a = sub.add_parser("analyze", help="uma analise (arquivo lido e mascarado localmente)")
     a.add_argument("file")
     g = sub.add_parser("gold-run", help="analisa as minutas do gabarito (LEIA_MINUTAS_DIR) e pontua")
