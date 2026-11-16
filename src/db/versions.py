@@ -7,7 +7,8 @@ quem nao programa edita pelo admin e cada edicao fica no ``domain_history``. Uma
 
 * ``apply_base``: indexa cada artigo da base normativa como um ``kb_docs`` cujo titulo e a citacao
   (``Lei 8.245/1991, art. 35``), que e como o grafo de analise acha o texto da norma.
-* ``apply_matrix``: desativa (sem apagar) os riscos ativos do tipo e grava os da versao. Normas sao
+* ``apply_matrix``: desativa (sem apagar) os riscos ativos do tipo e grava/atualiza os da versao
+  (uma linha por tema+risco; os removidos da versao nova ficam inativos). Normas sao
   normalizadas por ``normalize_norm`` (bead leia-lab-vz3): nenhuma e descartada em silencio.
 """
 
@@ -152,9 +153,12 @@ async def apply_matrix(
 ) -> bool:
     """Troca a matriz ativa do tipo pela versao do repo, numa transacao. ``False`` se ja aplicada.
 
-    Os riscos anteriores ficam ``active = false`` (nada e apagado; o ``domain_history`` registra a
-    troca e as analises antigas guardam sua propria foto). Temas novos sao criados; os que ja
-    existem so mudam de posicao. Exige o tipo ja semeado (``seed_defaults``: tipo e prompts).
+    Os riscos ativos anteriores ficam ``active = false`` (nada e apagado; o ``domain_history``
+    registra a troca e as analises antigas guardam sua propria foto). Os riscos da versao nova
+    entram por upsert em ``(theme_id, risk_id)``: um risco que muda de descricao ou criticidade
+    reaproveita a linha inativa em vez de violar a unique. Removidos da versao ficam inativos.
+    Temas novos sao criados; os que ja existem so mudam de posicao. Exige o tipo ja semeado
+    (``seed_defaults``: tipo e prompts).
     """
     name = f"matriz/{version}"
     ids = {a["citacao"]: a["id"] for a in read_base(base_version, data_dir)[0]}
@@ -183,7 +187,10 @@ async def apply_matrix(
             )
         await conn.executemany(
             "INSERT INTO risk_matrix (theme_id, risk_id, description, criticality, party, norms) "
-            "VALUES ($1, $2, $3, $4, $5, $6::jsonb)",
+            "VALUES ($1, $2, $3, $4, $5, $6::jsonb) "
+            "ON CONFLICT (theme_id, risk_id) DO UPDATE SET "
+            "description = EXCLUDED.description, criticality = EXCLUDED.criticality, "
+            "party = EXCLUDED.party, norms = EXCLUDED.norms, active = TRUE",
             [
                 (theme_ids[tema], x["id"], x["risco"], x["cor"], x["parte"], json.dumps(x["normas"], ensure_ascii=False))
                 for tema, x in rows

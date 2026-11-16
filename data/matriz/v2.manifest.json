@@ -1,0 +1,15 @@
+{
+  "versao": "v2",
+  "arquivo": "v2.jsonl",
+  "sha256": "013ebd61078eb1635c1320f465670ce662e2cc39a413f9c2bcc7b97afd9c2d86",
+  "linhas": 184,
+  "origem": {
+    "base": "matriz/v1",
+    "parecer": "gold/reviews/2026-11-16-locacao-02.json",
+    "mudancas": [
+      "R054: criticidade amarelo -> vermelho",
+      "R176: removido (parecer do advogado: nao e risco ajustavel por contrato)"
+    ]
+  },
+  "aviso": "Dados de apoio a analise juridica. A v2 incorpora um parecer de advogado sobre a minuta locacao-02 (R054 e R176); os demais riscos NAO foram validados por advogado. Revisao humana obrigatoria."
+}
