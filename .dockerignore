@@ -1,0 +1,16 @@
+# Nada de dado local entra no contexto de build (minutas, base normativa, segredos).
+.git
+.venv
+.env
+.local
+.beads
+.claude
+.commandcode
+.great_cto
+.planning
+**/__pycache__
+**/staticfiles
+leia-minutas-teste-mascaradas
+leia-kb-legislacao
+firefish
+mcp-pangolin
