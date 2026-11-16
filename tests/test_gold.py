@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -68,3 +69,10 @@ def test_committed_gold_set_is_big_enough_and_has_no_text():
 @pytest.mark.skipif(not os.environ.get("LEIA_MINUTAS_DIR"), reason="local masked minutas not configured")
 def test_committed_gold_set_matches_the_local_minutas():
     assert G.verify_gold(G.load_gold(), G.minutas_dir()) == []
+
+
+def test_gold_expected_ids_exist_in_the_real_matrix():
+    matrix = Path(G.GOLD_PATH).parents[1] / "data" / "matriz" / "v1.jsonl"
+    ids = {json.loads(line)["id"] for line in matrix.read_text(encoding="utf-8").splitlines() if line.strip()}
+    used = {risk for c in G.load_gold()["clauses"] for risk in c["expected"]}
+    assert used <= ids, f"gold ids fora da matriz v1: {sorted(used - ids)}"
