@@ -142,8 +142,15 @@ def test_committed_severity_only_covers_declared_expected_ids():
     g = G.load_gold()
     declared = {c["id"]: c["expected_severity"] for c in g["clauses"] if "expected_severity" in c}
     assert declared == {
+        "g01": {"R029": "yellow", "R031": "yellow"},
+        "g02": {"R073": "red", "R076": "red"},
+        "g03": {"R101": "yellow", "R102": "yellow"},
         "g04": {"R027": "red"},
         "g05": {"R053": "yellow", "R054": "red"},
+        "g07": {"R102": "yellow"},
+        "g08": {"R028": "red", "R029": "yellow", "R119": "red", "R147": "yellow"},
+        "g09": {"R036": "red", "R038": "yellow"},
+        "g10": {"R073": "red", "R076": "red", "R077": "yellow", "R138": "yellow"},
         "g11": {"R011": "red"},
         "g12": {"R026": "yellow"},
         "g13": {"R179": "red"},
@@ -162,7 +169,7 @@ def test_committed_severity_only_covers_declared_expected_ids():
     }
     for c in g["clauses"]:
         severities = c.get("expected_severity") or {}
-        assert set(severities) <= set(c["expected"]), f"{c['id']}: severidade de id nao esperado"
+        assert set(severities) == set(c["expected"]), f"{c['id']}: severidade difere dos ids esperados"
         assert set(severities.values()) <= {"red", "yellow", "green"}
         assert {rid: v3_sev[rid] for rid in severities} == severities
 
