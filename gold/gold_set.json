@@ -1,6 +1,6 @@
 {
   "version": 3,
-  "note": "Prototype labels remapped to the real matrix ids (R001..R185) of data/matriz/v1.jsonl (bead leia-lab-8tr.13). Clauses g04-g05 and g11-g16 of locacao-02 were validated by a lawyer (gold/reviews/2026-11-16-locacao-02.json): R011, R026, R179, R128, R131, R174, R107. Deliberately excluded: R007 from the locacao-02 clauses (lawyer: wrong excerpt, risk location unconfirmed; it is covered by g17 in locacao-01 instead), R176 (lawyer: not a risk) and the green/conforme rows R056/R180 (not expected alerts). All other clauses remain prototype labels, NOT lawyer-validated. g17 covers the locacao-01 clause 1 header (blank parties, address, dates, rent), expected R001/R006/R007; confirmed as the clean case for R007 (bead leia-lab-q3t) but NOT lawyer-validated. Clause numbers are segment_clauses() over the MASKED minuta. No minuta text is stored here. Severity uses the alert vocabulary red/yellow/green, mirroring the matrix criticality vermelho/amarelo/verde; only g05 and g17 carry expected_severity today, so every other clause is not severity-measured.",
+  "note": "Prototype labels remapped to the real matrix ids (R001..R185) of data/matriz/v1.jsonl (bead leia-lab-8tr.13). Clauses g04-g05 and g11-g16 of locacao-02 were validated by a lawyer (gold/reviews/2026-11-16-locacao-02.json): R011, R026, R179, R128, R131, R174, R107. Deliberately excluded: R007 from the locacao-02 clauses (lawyer: wrong excerpt, risk location unconfirmed; it is covered by g17 in locacao-01 instead), R176 (lawyer: not a risk) and the green/conforme rows R056/R180 (not expected alerts). All other clauses remain prototype labels, NOT lawyer-validated. g17 covers the locacao-01 clause 1 header (blank parties, address, dates, rent), expected R001/R006/R007; confirmed as the clean case for R007 (bead leia-lab-q3t) but NOT lawyer-validated. Clause numbers are segment_clauses() over the MASKED minuta. No minuta text is stored here. Severity uses the alert vocabulary red/yellow/green, mirroring the matrix criticality vermelho/amarelo/verde; clauses g04-g05 and g11-g17 carry expected_severity (all lawyer-validated clauses of locacao-02 plus g17 in locacao-01); the remaining prototype clauses are not severity-measured.",
   "minutas": {
     "locacao-01.txt": {
       "sha256": "60af5bad5f65cbc1cc408c1e2c1f1b6d44e7481d5ca5e8ecda923d6d57ce2869"
@@ -18,52 +18,37 @@
       "file": "locacao-01.txt",
       "clause_n": 6,
       "clause_sha256": "0db26a1893befdacb94eb5b5fd3c0d3ae5a407d666484b397383bf84364c4935",
-      "expected": [
-        "R029",
-        "R031"
-      ]
+      "expected": ["R029", "R031"]
     },
     {
       "id": "g02",
       "file": "locacao-01.txt",
       "clause_n": 11,
       "clause_sha256": "0b958083ea72625e8999cc4deff6b3d0d9837333aa4bbdea4e7060160469abb3",
-      "expected": [
-        "R073",
-        "R076"
-      ]
+      "expected": ["R073", "R076"]
     },
     {
       "id": "g03",
       "file": "locacao-01.txt",
       "clause_n": 17,
       "clause_sha256": "189fe1ade320f9cdd8baf066bb6e6b1ac7e0476bb8cf271ae760459984c28ace",
-      "expected": [
-        "R101",
-        "R102"
-      ]
+      "expected": ["R101", "R102"]
     },
     {
       "id": "g04",
       "file": "locacao-02.txt",
       "clause_n": 5,
       "clause_sha256": "0e6e4f72011ef63a9a5e5f16eb345fe420de4a6d53e02962581e3981603c33c9",
-      "expected": [
-        "R027"
-      ]
+      "expected": ["R027"],
+      "expected_severity": {"R027": "red"}
     },
     {
       "id": "g05",
       "file": "locacao-02.txt",
       "clause_n": 6,
       "clause_sha256": "0d2f08fceeffc21bae4920d4e5098f1051452d83a25ed18739285493e39d0d40",
-      "expected": [
-        "R053",
-        "R054"
-      ],
-      "expected_severity": {
-        "R054": "red"
-      }
+      "expected": ["R053", "R054"],
+      "expected_severity": {"R053": "yellow", "R054": "red"}
     },
     {
       "id": "g06",
@@ -77,114 +62,84 @@
       "file": "locacao-02.txt",
       "clause_n": 11,
       "clause_sha256": "6682b5387872ea0f1363a5e60cb481cc4b59d7b149c721b092c2cc698266c1c9",
-      "expected": [
-        "R102"
-      ]
+      "expected": ["R102"]
     },
     {
       "id": "g08",
       "file": "locacao-06.txt",
       "clause_n": 5,
       "clause_sha256": "d9725c805c01aa83938d535cf46cd585071d9b5431077127ab2ea7ee094f2a79",
-      "expected": [
-        "R028",
-        "R029",
-        "R119",
-        "R147"
-      ]
+      "expected": ["R028", "R029", "R119", "R147"]
     },
     {
       "id": "g09",
       "file": "locacao-06.txt",
       "clause_n": 8,
       "clause_sha256": "ced270c81f889b8f58500cc582bb4ce8a57bdb3a919d9ae2564eb23ce2ef296a",
-      "expected": [
-        "R036",
-        "R038"
-      ]
+      "expected": ["R036", "R038"]
     },
     {
       "id": "g10",
       "file": "locacao-06.txt",
       "clause_n": 14,
       "clause_sha256": "efa0cf62d6654a83edd88af95d45b18b76fc252589bc38b059c60657ed1a592d",
-      "expected": [
-        "R073",
-        "R076",
-        "R077",
-        "R138"
-      ]
+      "expected": ["R073", "R076", "R077", "R138"]
     },
     {
       "id": "g11",
       "file": "locacao-02.txt",
       "clause_n": 3,
       "clause_sha256": "29ebe9679672a721c997d4603c4f5817457de23cc720097b32c25ab8bde07f0d",
-      "expected": [
-        "R011"
-      ]
+      "expected": ["R011"],
+      "expected_severity": {"R011": "red"}
     },
     {
       "id": "g12",
       "file": "locacao-02.txt",
       "clause_n": 4,
       "clause_sha256": "e98b7e1f00ee25d9ecb55ceeee60afaa1a14119e7518ffa3fa916568a6863648",
-      "expected": [
-        "R026"
-      ]
+      "expected": ["R026"],
+      "expected_severity": {"R026": "yellow"}
     },
     {
       "id": "g13",
       "file": "locacao-02.txt",
       "clause_n": 7,
       "clause_sha256": "db27b741feea8707c723685efea5100138c6dac105a42de8d470063df5d70d51",
-      "expected": [
-        "R179"
-      ]
+      "expected": ["R179"],
+      "expected_severity": {"R179": "red"}
     },
     {
       "id": "g14",
       "file": "locacao-02.txt",
       "clause_n": 9,
       "clause_sha256": "9a7462b0bb824d24a3a261990174f031b5ed3d7f420f0b8b12c93e3eb5d7aec9",
-      "expected": [
-        "R128",
-        "R131"
-      ]
+      "expected": ["R128", "R131"],
+      "expected_severity": {"R128": "red", "R131": "yellow"}
     },
     {
       "id": "g15",
       "file": "locacao-02.txt",
       "clause_n": 13,
       "clause_sha256": "9f83d810a7f06fcc336ad75119c98dde453e2c69adcc5229536d63c40616888c",
-      "expected": [
-        "R174"
-      ]
+      "expected": ["R174"],
+      "expected_severity": {"R174": "yellow"}
     },
     {
       "id": "g16",
       "file": "locacao-02.txt",
       "clause_n": 19,
       "clause_sha256": "6303e948e809ed4bdaf4e457e2aba31c1374f5ea69baf2166b27d5d055abb520",
-      "expected": [
-        "R107"
-      ]
+      "expected": ["R107"],
+      "expected_severity": {"R107": "yellow"}
     },
     {
       "id": "g17",
       "file": "locacao-01.txt",
       "clause_n": 1,
       "clause_sha256": "d3b2c6ae0636a58173ef66d37bba196cedcd7dc7826ceb7e8a54334e9e40d052",
-      "expected": [
-        "R001",
-        "R006",
-        "R007"
-      ],
-      "expected_severity": {
-        "R001": "yellow",
-        "R006": "yellow",
-        "R007": "red"
-      }
+      "expected": ["R001", "R006", "R007"],
+      "expected_severity": {"R001": "yellow", "R006": "yellow", "R007": "red"}
     }
   ]
 }
