@@ -308,3 +308,54 @@ O painel de gestão e o rastreio são **independentes do motor** (dados em Postg
 6. Argilla: estado de manutenção não verificado; Label Studio: Postgres/requisitos e mapeamento por edição de logs/revisão não confirmados.
 7. Context7 não foi usado nesta rodada (perguntas de licença, preço e hospedagem, só nas páginas oficiais); a rodada anterior usou Context7 para Directus e Langfuse.
 8. Pergunta ao humano: a organização se enquadra na MSCL do Directus (receita < US$ 5 mi e < 50 pessoas)? Se não, C2 perde força e a combinação 3 sobe.
+
+## 10. Adendo: MLflow GenAI como candidato de rastreio e avaliação (leia-lab-1em)
+
+- **Data:** 2026-11-16. **Bead:** leia-lab-1em.
+- **Origem:** pergunta do responsável pelo produto — "o <https://mlflow.org/docs/latest/genai/> não seria uma opção para as ferramentas desse projeto?".
+- **Lacuna que este adendo corrige:** nem a pesquisa de 2026-11-15 nem o adendo B2b (seção 9) incluíram **MLflow** entre os candidatos de rastreio e avaliação. Ele não entra na categoria de gestão de dados de domínio (não é CRUD sobre as tabelas de domínio), então também não substitui a seção 9.
+- **Escopo:** leitura de documentação oficial. **Nenhum comportamento foi executado** — não houve protótipo, diferente do que a B3 fez com LangSmith, Langfuse e Phoenix. Mesma convenção **[F]/[I]/[R]** do cabeçalho.
+
+### 10.1 O que o MLflow 3 GenAI oferece
+
+- **Licença e governança.** Open source, apresentado como parte da Linux Foundation, com "observability… 100% FREE" e foco explícito em neutralidade de fornecedor. [F] <https://mlflow.org/docs/latest/genai/tracing/>. O arquivo de licença (Apache-2.0, pela memória) **não foi reconferido** nesta rodada.
+- **Rastreio.** OTel-compatível, com suporte nativo às *GenAI Semantic Conventions* para export e ingestão — ou seja, traço do MLflow pode ir para outro backend OTel, e traço OTel de terceiro pode ser ingerido em `/v1/traces`. [F] <https://mlflow.org/docs/latest/genai/tracing/>, <https://mlflow.org/docs/latest/genai/tracing/app-instrumentation/opentelemetry/>
+- **LangGraph.** É rastreado pelo autolog do LangChain: `mlflow.langchain.autolog()` captura a execução do grafo; o JS/TS usa ingestão OTel. **Ressalva documentada:** em async, `run_tracer_inline=True` é necessário para aninhar spans manuais, e com ele "múltiplas invocações sequenciais do grafo na mesma função async podem fundir traços". [F] <https://mlflow.org/docs/latest/genai/tracing/integrations/listing/langgraph/>
+- **Avaliação.** `mlflow.genai.evaluate(data, predict_fn, scorers)`: dataset com `inputs`/`expectations`, função de predição e **scorer de código puro** (`@scorer def exact_match(expectations, outputs)`), além dos juízes LLM embutidos (`Correctness`, `Guidelines`). Resultado vira run na UI, comparável entre versões. [F] <https://mlflow.org/docs/latest/genai/eval-monitor/>
+- **Feedback humano.** Anexado ao traço, com usuário, data e revisões; datasets podem ser criados a partir de tráfego real. [F] <https://mlflow.org/docs/latest/genai/tracing/>, <https://mlflow.org/docs/latest/genai/datasets/>
+- **Prompts.** Prompt Registry com versionamento, comparação e *lineage* de qual versão do app usa cada prompt. [F] <https://mlflow.org/docs/latest/genai/prompt-registry/>
+- **Self-host.** `mlflow server` com **backend store relacional** (SQLite por padrão a partir da 3.7.0; PostgreSQL como caminho de escala) + **artifact store** (S3/GCS/Azure Blob ou local). Compose oficial provisiona MLflow + PostgreSQL + RustFS; há Helm oficial. Autenticação: basic HTTP, SSO e plugins; *workspaces* com permissão por workspace exigem backend SQL. [F] <https://mlflow.org/docs/latest/self-hosting/>
+- **Privacidade.** Existe página dedicada a redigir PII dos traços e opção de desligar o rastreio globalmente; a página de redaction **não foi lida em detalhe** nesta rodada. [F] <https://mlflow.org/docs/latest/genai/tracing/observe-with-traces/masking/>, <https://mlflow.org/docs/latest/genai/tracing/app-instrumentation/automatic/#disabling-tracing>
+
+### 10.2 Contra o Q8 e os critérios da ADR-0002
+
+| Critério | MLflow GenAI | Leitura |
+|---|---|---|
+| **Trilha auditável (Q8, hard)** | Traço com entradas/saídas por span; não guarda, por passo, a versão da matriz/prompt nem a razão da decisão | **Ganho zero no requisito duro.** A trilha continua no Postgres (gatilho *append-only* + snapshot por análise). O MLflow é vista de depuração, como a LangSmith |
+| **Menor reescrita** | Troca `src/tracing.py` (`client_span`, `tag_span`, `langsmith_tracing`, ~70 linhas) e o `trace-usage` do CLI, que só existe por causa do limite de plano | Custo pequeno, mas não zero; o `trace-usage` **deixa de fazer sentido** (self-host não cobra por traço) |
+| **Margem de custo** | Sem cobrança por traço: o limite passa a ser o host | **Elimina o risco 1 da ADR-0002** (sub-run da LangSmith) por construção, não por medição |
+| **Privacidade (Q2)** | `autolog` captura entrada/saída de **cada nó** do LangGraph | Mesma classe de exposição que a seção 2 aponta no `raw_text`: a proteção passa a depender de o estado já estar mascarado (M2). O `client_span(allowed=…)` atual é allowlist explícita — mais seguro por construção |
+| **Avaliação com gold set** | Scorer de código encaixa quase inteiro sobre `score()` de `src/eval/gold.py`; ganho real é a UI de comparação e o dataset registry | O gabarito é JSON no git com sha256; no MLflow seria **espelho**, não fonte de verdade — o mesmo raciocínio com que a ADR-0002 recusou o Prompt Hub |
+| **Prompts** | Prompt Registry com versões e lineage | Segunda fonte da verdade; a decisão (tabela `prompts` + Django Admin) continua |
+| **Operação** | Server + Postgres + artifact store; sem ClickHouse/Redis/S3 obrigatórios | Mais leve que o self-host do Langfuse, que a ADR-0002 derrubou por peso — mas ainda é **um serviço novo** no homelab |
+
+### 10.3 Consequência para a decisão [R]
+
+**Não substitui a escolha de agora.** O que a ADR-0002 comprou com a LangSmith — rastreio por variável de ambiente, sem código de produção, com margem medida — continua válido, e o MLflow não muda o requisito eliminatório (Q8) nem as fontes de verdade de prompts e gabarito.
+
+**Muda o caminho de saída.** A "Combinação 3 — LangGraph + Langfuse + Django Admin" que a ADR-0002 deixou prevista para o caso de a LangSmith ficar cara ou inaceitável por LGPD é mais pesada do que o necessário: ClickHouse + Redis + S3, e mascaramento/auditoria atrás de plano. O **MLflow é o melhor candidato self-host** porque:
+
+1. servidor open source sem plano Enterprise (a ADR registra "self-host da LangSmith só em Enterprise" como risco);
+2. operação enxuta: Postgres + artifact store;
+3. avaliação com scorer determinístico **no OSS**, o que o Langfuse só cobre com experimento via UI/juiz;
+4. traço OTel-compatível, então sair dele para um Phoenix já instalado não é reescrita.
+
+**Como fechar a dúvida (proposta):** spike local curto, descartável, com critério de saída explícito — (a) subir `mlflow server` com Postgres local; (b) rodar `gold-run` com um `@scorer` embrulhando `score()` e conferir se o P/R/F1 bate com o da CLI; (c) provar, com captura de payload como a B3 fez, que nenhum texto cru sai do processo no `autolog`; (d) registrar esforço de operação no homelab. Isso não bloqueia M2/M5 e pode esperar a matriz `v2` fechar.
+
+### 10.4 Lacunas deste adendo
+
+1. **Redaction de PII** no MLflow com `autolog` de LangGraph: a página existe, o comportamento sobre spans de nó **não verificado**.
+2. **Volume e retenção** de traços: sem medição equivalente à da B3 (~108 spans/análise, 1 traço raiz por análise), não dá para dimensionar backend store nem política de limpeza.
+3. **Licença**: arquivo `LICENSE` do repositório não reconferido nesta rodada; as páginas lidas falam em "open source" e Linux Foundation.
+4. **Permissões**: *workspaces* exigem backend SQL [F], mas RBAC fino (por experimento, não por workspace) **não verificado**.
+5. **Nenhum comportamento executado** — toda a seção é documentação, como a rodada original; os números da LangSmith (margem, esforço) continuam sendo os únicos medidos.

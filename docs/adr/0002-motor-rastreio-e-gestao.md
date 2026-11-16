@@ -31,7 +31,7 @@ O G2 foi decidido em 2026-11-16, com os números da B3/B4 à vista.
 | **Gestão** | **Django Admin** (`src/management/`) sobre as tabelas de domínio | App Django no próprio repositório, com login **próprio** no Postgres (membro de `leia_app`), para o histórico distinguir quem escreveu |
 | **Trilha auditável** | **Postgres próprio** — histórico *append-only* + snapshot por análise | Requisito duro do Q8. A ferramenta de rastreio é a vista de depuração, **não** a fonte da auditoria |
 
-**Ficam de fora:** Langfuse (Cloud e self-host), Directus, pydantic-ai como produto, Logfire, Langflow. O **Phoenix self-hosted** não é rastreio de produção; continua como instrumento local de medição e depuração no CT 116, sem compromisso de disponibilidade.
+**Ficam de fora:** Langfuse (Cloud e self-host), Directus, pydantic-ai como produto, Logfire, Langflow. O **MLflow** não estava na avaliação original; entra nesta ADR como alternativa de saída (Combinação 4), não como escolha. O **Phoenix self-hosted** não é rastreio de produção; continua como instrumento local de medição e depuração no CT 116, sem compromisso de disponibilidade.
 
 **O que a escolha não muda:**
 
@@ -73,6 +73,14 @@ Fica registrado o único ponto em que essa combinação venceria: **dado no Bras
 
 Combina MIT + BSD e usa a gestão escolhida. Saiu por inferência (a pesquisa já a marcava como "não prototipar"): o rastreio seria o Langfuse, com a margem menor e o custo de operar ClickHouse. **Não** está descartada como caminho de saída: é a troca de menor atrito se a LangSmith ficar cara ou inaceitável por LGPD — custa uma variável de ambiente e o `src/tracing/` da B3.
 
+### Combinação 4 — LangGraph + MLflow (self-host)
+
+Não foi prototipada nem estava na avaliação original (lacuna registrada em `docs/research/2026-11-framework-evaluation.md` §10). Entra nesta ADR porque é o melhor candidato a **caminho de saída** se o risco 1 (cobrança de sub-run) ou o risco 3 (LGPD/residência) se materializarem:
+
+- **Por que interessa:** servidor open source sem plano Enterprise (a LangSmith só oferece self-host em Enterprise); rastreio OTel-compatível, com autolog de LangGraph; avaliação com **scorer de código** no OSS, que é exatamente a forma do `score()` de `src/eval/gold.py`; operação enxuta (server + Postgres + artifact store), sem o ClickHouse + Redis + S3 do Langfuse. Por não cobrar por traço, elimina o risco 1 por construção.
+- **Por que não agora:** não muda o requisito duro (Q8 continua no Postgres); troca `src/tracing.py` e aposenta o `trace-usage` do CLI; e o `autolog` captura entrada/saída de **cada nó** do grafo, então a proteção de privacidade passa a depender de o estado já estar mascarado (M2), em vez da allowlist do `client_span(allowed=…)`. Prompt Registry e datasets seriam segunda fonte da verdade, pelo mesmo motivo que o Prompt Hub foi recusado.
+- **Como fechar:** spike local curto — `mlflow server` com Postgres local, `gold-run` com um `@scorer` embrulhando `score()` (mesmo P/R/F1 da CLI) e prova, com captura de payload como na B3, de que nenhum texto cru sai do processo. Não bloqueia M2/M5.
+
 ### pydantic-ai do acornworm (com Logfire ou como produto)
 
 Motor bom, gestão mais fraca: o self-host do Logfire é só Enterprise, a edição de prompts na UI não foi confirmada e o acornworm **não mascara** dados pessoais — precisaria ganhar mascaramento, trilha e matriz por tipo antes de ser produto. Zero migração de UI não compensa reconstruir o que a F/B4 já entregam sobre o LangGraph.
@@ -113,9 +121,9 @@ Descartado na pesquisa: RBAC ausente no OSS, histórico de falhas críticas e vo
 
 | # | Risco | Impacto | Como fechar |
 |---|---|---|---|
-| 1 | **Cobrança de sub-run na LangSmith** — a medição assumiu "trace = árvore inteira (1 raiz)" | Se sub-runs forem cobrados, a margem cai ~9× e a conta vira a do Langfuse (~460/mês) | Conferir o painel de billing com um mês de uso real; se cair, trocar para a Combinação 3 |
+| 1 | **Cobrança de sub-run na LangSmith** — a medição assumiu "trace = árvore inteira (1 raiz)" | Se sub-runs forem cobrados, a margem cai ~9× e a conta vira a do Langfuse (~460/mês) | Conferir o painel de billing com um mês de uso real; se cair, trocar para a Combinação 4 (MLflow self-host) ou 3 |
 | 2 | **Retenção de 14 dias** no grátis | Traços antigos somem; **não** afeta a auditoria (que é o Postgres) | Nenhuma ação enquanto a auditoria for o Postgres; reavaliar se alguém exigir retenção de traço |
-| 3 | **LGPD / residência** | Nenhuma nuvem candidata tem região no Brasil | Decisão do responsável; a saída técnica é a Combinação 3 + Phoenix/Langfuse self-host |
+| 3 | **LGPD / residência** | Nenhuma nuvem candidata tem região no Brasil | Decisão do responsável; a saída técnica é a Combinação 4 (MLflow self-host) ou 3 + Phoenix/Langfuse self-host |
 | 4 | **Qualidade de detecção não medida** | Jev/LLM offline são stubs; o que foi provado é o **mecanismo**, não a qualidade | Rodar o gabarito com `TYPESAFE_API_KEY` e minutas reais mascaradas (item M4 do épico) |
 | 5 | **Matriz real e base normativa fora do git** (ponto em aberto da ADR-0001) | O produto não reproduz a análise de produção a partir do repositório | Item M5 do épico; formato de versionamento ainda **não** decidido |
 | 6 | **`ingest_graph` ainda guarda `raw_text` no estado** (bead `leia-lab-8wy`) | Mesma classe de exposição que o grafo de análise tinha | Item M6 do épico |
@@ -169,7 +177,7 @@ flowchart LR
 ## Referências
 
 - `docs/adr/0001-decisoes-de-produto-antes-do-motor-e-da-gestao.md` — Q1–Q12.
-- `docs/research/2026-11-framework-evaluation.md` — §1 (finalistas), §4 (achados por candidato), §5 (contra o Q8), §9.6 (combinações ranqueadas).
+- `docs/research/2026-11-framework-evaluation.md` — §1 (finalistas), §4 (achados por candidato), §5 (contra o Q8), §9.6 (combinações ranqueadas), §10 (MLflow GenAI, adendo leia-lab-1em).
 - Beads `leia-lab-1g1.9` (F), `leia-lab-1g1.4` (B3), `leia-lab-1g1.5` (B4), `leia-lab-1g1.6` (G2), `leia-lab-1g1.7` (esta ADR).
 - `TRACING.md` (branch `prototype/tracing`), `PROTOTYPE.md` (branches `prototype/foundation` e `prototype/management`).
 - Comparativo dos protótipos: `.planning/g2-comparativo.html` (arquivo local; não versionado).
