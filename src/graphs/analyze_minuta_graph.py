@@ -127,15 +127,25 @@ async def prepare_input(
     return {"text": mask_personal_data(text), "filename": resolve_doc_alias(filename, doc_name)}
 
 
+def _run_config(config: dict[str, Any] | None, inp: dict[str, str]) -> dict[str, Any]:
+    """Nome do traco + apelido do arquivo como metadado (nunca o nome real)."""
+    cfg = dict(config or {})
+    cfg.setdefault("run_name", "analisar_minuta")
+    cfg["metadata"] = {**cfg.get("metadata", {}), "filename_alias": inp["filename"]}
+    return cfg
+
+
 async def analyze(graph: Any, *, config: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
     """``prepare_input`` + execucao do grafo; devolve o estado final."""
-    return await graph.ainvoke(await prepare_input(**kwargs), config)
+    inp = await prepare_input(**kwargs)
+    return await graph.ainvoke(inp, _run_config(config, inp))
 
 
 async def analyze_stream(
     graph: Any, *, config: dict[str, Any] | None = None, stream_mode: str = "updates", **kwargs: Any
 ) -> AsyncIterator[Any]:
-    async for chunk in graph.astream(await prepare_input(**kwargs), config, stream_mode=stream_mode):
+    inp = await prepare_input(**kwargs)
+    async for chunk in graph.astream(inp, _run_config(config, inp), stream_mode=stream_mode):
         yield chunk
 
 
