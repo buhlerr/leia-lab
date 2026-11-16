@@ -1,4 +1,4 @@
-"""Registro de uma analise com a foto congelada das regras (a trilha por passo entra na M2b)."""
+"""Registro de uma analise: a foto congelada das regras e a trilha append-only de cada passo."""
 
 from __future__ import annotations
 
@@ -51,3 +51,36 @@ async def finish_analysis(
         minuta_type,
         json.dumps(report, ensure_ascii=False, default=str) if report is not None else None,
     )
+
+
+async def append_trail(
+    pool: asyncpg.Pool, analysis_id: uuid.UUID | str, snap_meta: dict[str, Any], steps: list[dict[str, Any]]
+) -> None:
+    """Acrescenta passos em ordem (``seq`` continuo por analise).
+
+    Cada passo: ``step`` e, opcionais, ``clause_n``, ``input_summary`` (so dado MASCARADO),
+    ``decision``, ``score``, ``cutoff`` e ``cited_norms``. ``snap_meta`` traz as versoes da foto.
+    """
+    if not steps:
+        return
+    async with pool.acquire() as conn, conn.transaction():
+        seq = await conn.fetchval(
+            "SELECT coalesce(max(seq), 0) FROM analysis_trail WHERE analysis_id = $1", analysis_id
+        )
+        for i, s in enumerate(steps, start=seq + 1):
+            await conn.execute(
+                "INSERT INTO analysis_trail (analysis_id, seq, step, clause_n, input_summary, decision, score, "
+                "cutoff, matrix_version, prompt_version, cited_norms) "
+                "VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, $8, $9, $10, $11)",
+                analysis_id,
+                i,
+                s["step"],
+                s.get("clause_n"),
+                json.dumps(s.get("input_summary", {}), ensure_ascii=False),
+                json.dumps(s.get("decision", {}), ensure_ascii=False, default=str),
+                s.get("score"),
+                s.get("cutoff"),
+                snap_meta["matrix_version"],
+                snap_meta["prompt_version"],
+                list(s.get("cited_norms", [])),
+            )

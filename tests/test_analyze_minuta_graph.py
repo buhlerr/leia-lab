@@ -1,6 +1,6 @@
 from src.db.connection import init_db
 from src.db.seed import seed_defaults
-from src.graphs.analyze_minuta_graph import build_analyze_minuta_graph
+from src.graphs.analyze_minuta_graph import analyze, build_analyze_minuta_graph
 from src.graphs.ingest_graph import build_ingest_graph
 from tests._rules_helper import use_rules
 
@@ -37,7 +37,7 @@ async def test_analyze_minuta_graph_end_to_end_supported_contract(pool, settings
         "com aluguel mensal de R$ 2.800,00.\n"
         "Cláusula 2ª - Do Reajuste: O aluguel será reajustado semestralmente pelo índice IGP-M."
     )
-    out = await graph.ainvoke({"raw_text": minuta, "filename": "minuta_locacao.txt"})
+    out = await analyze(graph, raw_text=minuta, filename="minuta_locacao.txt")
 
     assert "999.888.777-66" not in out["text"]
     assert out["suportado"] is True
@@ -60,12 +60,7 @@ async def test_analyze_minuta_graph_short_circuits_unsupported_doc(pool, setting
     await seed_defaults(pool)
     graph = build_analyze_minuta_graph(pool, settings)
 
-    out = await graph.ainvoke(
-        {
-            "raw_text": "ATA DE ASSEMBLEIA GERAL EXTRAORDINÁRIA DE SOCIEDADE ANÔNIMA FECHADA.",
-            "filename": "ata_societaria.txt",
-        }
-    )
+    out = await analyze(graph, raw_text="ATA DE ASSEMBLEIA GERAL EXTRAORDINÁRIA DE SOCIEDADE ANÔNIMA FECHADA.", filename="ata_societaria.txt")
 
     assert out["suportado"] is False
     assert "ficha" not in out or out.get("ficha") is None
@@ -96,7 +91,7 @@ async def test_unsupported_doc_never_calls_ficha_triar_buscar_analisar(pool, set
     await init_db(pool)
     await seed_defaults(pool)
     graph = mod.build_analyze_minuta_graph(pool, settings)
-    out = await graph.ainvoke({"raw_text": "ATA DE ASSEMBLEIA GERAL.", "filename": "ata.txt"})
+    out = await analyze(graph, raw_text="ATA DE ASSEMBLEIA GERAL.", filename="ata.txt")
     assert out["report_envelope"]["status"] == "unsupported"
     assert calls == ["tipo"]
 
@@ -138,7 +133,7 @@ async def test_triage_cutoff_gates_risk_checks(pool, settings, monkeypatch):
     monkeypatch.setattr(mod, "call_jev", spy)
     await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
     graph = mod.build_analyze_minuta_graph(pool, settings)
-    out = await graph.ainvoke({"raw_text": _MINUTA, "filename": "minuta.txt"})
+    out = await analyze(graph, raw_text=_MINUTA, filename="minuta.txt")
 
     assert not any("REAJ-01" in q for q in asked)
     assert all(cl["checks"] == [] and cl["confirmados"] == [] for cl in out["clausulas"])
@@ -176,7 +171,7 @@ async def test_jev_concurrency_is_capped_across_nested_fanouts(pool, settings, m
     )
     await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
     graph = mod.build_analyze_minuta_graph(pool, settings)
-    await graph.ainvoke({"raw_text": "CONTRATO DE LOCAÇÃO RESIDENCIAL\n" + clausulas, "filename": "m.txt"})
+    await analyze(graph, raw_text="CONTRATO DE LOCAÇÃO RESIDENCIAL\n" + clausulas, filename="m.txt")
 
     assert 1 < peak <= mod._CONCURRENCY
 
@@ -199,7 +194,7 @@ async def test_tema_map_ids_resolve_to_citation_without_duplicates_or_empty_norm
         {"reajuste_e_indexacao": ["lei-10192-2001-art-2", "lei-9999-inexistente"]},
     )
     graph = build_analyze_minuta_graph(pool, settings)
-    out = await graph.ainvoke({"raw_text": _MINUTA, "filename": "minuta.txt"})
+    out = await analyze(graph, raw_text=_MINUTA, filename="minuta.txt")
 
     for cl in out["clausulas"]:
         citacoes = [n["citacao"] for n in cl["normas"]]

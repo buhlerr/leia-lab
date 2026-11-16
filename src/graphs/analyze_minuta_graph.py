@@ -1,13 +1,18 @@
 """Grafo LangGraph equivalente a ``LEIA - Analisar Minuta.json``.
 
-``START -> read_file -> mascarar -> iniciar -> classificar -(suportado)-> ficha -> triar -> buscar
--> analisar -> validar -> END``; minuta nao suportada desvia ``classificar -> validar``.
+``START -> iniciar -> classificar -(suportado)-> ficha -> triar -> buscar -> analisar -> validar -> END``;
+minuta nao suportada desvia ``classificar -> validar``.
 Texto de minuta nunca entra em logs nem em mensagens de excecao.
 
-As regras (tipos, temas, matriz de riscos e prompts) NAO sao argumentos nem constantes: ``iniciar``
-le uma foto atomica das tabelas de dominio (``load_rules_snapshot``) e grava a analise com ela;
-o resto do grafo usa so essa foto. Assim duas analises com a matriz editada entre elas guardam,
-cada uma, a regra que a decidiu.
+Privacidade: o grafo NUNCA ve texto cru. ``prepare_input`` (usado por ``analyze``/``analyze_stream``)
+le e mascara FORA do grafo, entao nenhum checkpointer, stream ou rastreador recebe o texto original.
+O estado nao tem ``raw_text`` nem ``file_path``, e ``iniciar`` recusa texto que nao esteja mascarado.
+Quem envolver o grafo (rastreio, API) tem de chamar ``analyze()``, nunca ``graph.ainvoke`` com texto cru.
+
+Regras: tipos, temas, matriz de riscos e prompts NAO sao argumentos nem constantes. ``iniciar`` le uma
+foto atomica das tabelas de dominio (``load_rules_snapshot``) e grava a analise com ela; o resto do
+grafo usa so essa foto. Cada passo acrescenta um registro a ``analysis_trail``: um ``analysis_id``
+reconstroi a decisao inteira.
 """
 
 from __future__ import annotations
@@ -16,6 +21,8 @@ import asyncio
 import json
 import re
 import weakref
+from collections.abc import AsyncIterator
+from functools import wraps
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
@@ -25,7 +32,7 @@ from langgraph.graph import END, START, StateGraph
 from src.clients.jev import call_jev
 from src.clients.llm import chat_completion
 from src.config import Settings
-from src.db.analyses import finish_analysis, start_analysis
+from src.db.analyses import append_trail, finish_analysis, start_analysis
 from src.db.rules import load_rules_snapshot
 from src.graphs.ingest_graph import _read_path
 from src.graphs.minuta_rules import (
@@ -38,7 +45,9 @@ from src.rag.embeddings import EmbeddingResult, embed_text
 from src.rag.hybrid_search import hybrid_search_rrf
 
 _EMPTY_TEXT_MSG = "text must be a non-empty string"
+_UNMASKED_MSG = "graph input needs masked 'text'; use analyze()/prepare_input() (raw text never enters the graph)"
 _CONCURRENCY = 8  # teto global de chamadas externas (Jev, LLM, embeddings) por loop
+_EXCERPT = 200  # caracteres do texto MASCARADO da clausula guardados na trilha
 
 # Criterios das perguntas ao Jev. As INSTRUCOES vem da tabela prompts; os criterios ainda sao codigo.
 _UNSUPPORTED = "Qualquer outro documento, como lei, codigo, parecer, contrato de outro tipo ou texto sem relacao."
@@ -54,11 +63,9 @@ _NC = {"nao_consta": "O contrato nao informa isso, ou nenhuma opcao corresponde.
 
 
 class AnalyzeMinutaState(TypedDict, total=False):
-    file_path: str
-    raw_text: str
-    filename: str
-    doc_name: str
-    text: str
+    # Sem raw_text / file_path / doc_name, de proposito (ver docstring do modulo).
+    filename: str  # apelido publico (documento-<sha8>.<ext>), nunca o nome real
+    text: str  # texto MASCARADO
     analysis_id: str
     rules: dict[str, Any]  # conteudo da foto das regras (sem dado pessoal)
     rules_meta: dict[str, Any]  # hash, matrix_version, prompt_version, history_id
@@ -105,6 +112,33 @@ def _type_rules(state: AnalyzeMinutaState) -> dict[str, Any]:
     return state["rules"]["types"][state["tipo"]]
 
 
+# ---------------------------------------------------------------- entrada (fora do grafo)
+async def prepare_input(
+    *, raw_text: str | None = None, file_path: str | Path | None = None, filename: str = "", doc_name: str = ""
+) -> dict[str, str]:
+    """Le e mascara localmente. O dict devolvido e a UNICA coisa que entra no grafo."""
+    text = raw_text
+    if text is None and file_path is not None:
+        path = Path(file_path)
+        text = await asyncio.to_thread(_read_path, path)
+        filename = filename or path.name
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError(_EMPTY_TEXT_MSG)
+    return {"text": mask_personal_data(text), "filename": resolve_doc_alias(filename, doc_name)}
+
+
+async def analyze(graph: Any, *, config: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+    """``prepare_input`` + execucao do grafo; devolve o estado final."""
+    return await graph.ainvoke(await prepare_input(**kwargs), config)
+
+
+async def analyze_stream(
+    graph: Any, *, config: dict[str, Any] | None = None, stream_mode: str = "updates", **kwargs: Any
+) -> AsyncIterator[Any]:
+    async for chunk in graph.astream(await prepare_input(**kwargs), config, stream_mode=stream_mode):
+        yield chunk
+
+
 def build_analyze_minuta_graph(
     pool: asyncpg.Pool,
     settings: Settings | None = None,
@@ -148,36 +182,56 @@ def build_analyze_minuta_graph(
         async with _limiter():
             return await chat_completion(system, user, use, temperature=0.1, max_tokens=900)
 
-    async def read_file(state: AnalyzeMinutaState) -> dict[str, Any]:
-        text = state.get("raw_text")
-        update: dict[str, Any] = {}
-        if text is None and state.get("file_path"):
-            path = Path(state["file_path"])
-            text = await asyncio.to_thread(_read_path, path)
-            update["filename"] = state.get("filename") or path.name
-        if not isinstance(text, str) or not text.strip():
-            raise ValueError(_EMPTY_TEXT_MSG)
-        update["raw_text"] = text
-        return update
+    async def rec(state: AnalyzeMinutaState, steps: list[dict[str, Any]]) -> None:
+        await append_trail(pool, state["analysis_id"], state["rules_meta"], steps)
 
-    async def mascarar(state: AnalyzeMinutaState) -> dict[str, Any]:
-        return {
-            "text": mask_personal_data(state["raw_text"]),
-            "filename": resolve_doc_alias(state.get("filename", ""), state.get("doc_name", "")),
-        }
+    def guarded(fn: Any) -> Any:
+        """Se um no falha, a analise fica 'failed' com o TIPO do erro (nunca a mensagem: pode ter texto)."""
+
+        @wraps(fn)
+        async def inner(state: AnalyzeMinutaState) -> dict[str, Any]:
+            try:
+                return await fn(state)
+            except Exception as e:
+                if state.get("analysis_id"):
+                    await finish_analysis(
+                        pool,
+                        state["analysis_id"],
+                        status="failed",
+                        minuta_type=state.get("tipo"),
+                        report={"error": type(e).__name__, "step": fn.__name__},
+                    )
+                raise
+
+        return inner
 
     async def iniciar(state: AnalyzeMinutaState) -> dict[str, Any]:
+        text = state.get("text")
+        # Mascarar e idempotente: texto que muda ao ser mascarado de novo nao passou por prepare_input.
+        if not isinstance(text, str) or not text.strip() or mask_personal_data(text) != text:
+            raise ValueError(_UNMASKED_MSG)
+        alias = state.get("filename", "")
         # Falha alto aqui (RulesConfigError), antes de qualquer chamada externa, se faltar regra.
         snap = await load_rules_snapshot(pool)
-        aid = await start_analysis(
-            pool, snap, filename_alias=state.get("filename", ""), masked_text=state["text"], params=params
-        )
+        aid = await start_analysis(pool, snap, filename_alias=alias, masked_text=text, params=params)
         meta = {
             "hash": snap.hash,
             "matrix_version": snap.matrix_version,
             "prompt_version": snap.prompt_version,
             "history_id": snap.history_id,
         }
+        await append_trail(
+            pool,
+            aid,
+            meta,
+            [
+                {
+                    "step": "iniciar",
+                    "input_summary": {"filename_alias": alias, "masked_chars": len(text)},
+                    "decision": {"rules_hash": snap.hash, "domain_history_id": snap.history_id, "params": params},
+                }
+            ],
+        )
         return {"analysis_id": str(aid), "rules": snap.content, "rules_meta": meta}
 
     async def classificar(state: AnalyzeMinutaState) -> dict[str, Any]:
@@ -191,6 +245,18 @@ def build_analyze_minuta_graph(
         score = prob.get(a["choice"]) if isinstance(prob, dict) else None
         score = float(score if score is not None else a.get("confidence") or 0)
         ok = a["choice"] in types and score >= min_type_score
+        await rec(
+            state,
+            [
+                {
+                    "step": "classificar",
+                    "input_summary": {"candidate_types": sorted(types), "masked_chars": min(len(state["text"]), 4000)},
+                    "decision": {"tipo": a["choice"], "suportado": ok},
+                    "score": score,
+                    "cutoff": min_type_score,
+                }
+            ],
+        )
         return {"tipo": a["choice"], "score_tipo": score, "suportado": ok, "stats": {}}
 
     async def ficha(state: AnalyzeMinutaState) -> dict[str, Any]:
@@ -231,17 +297,25 @@ def build_analyze_minuta_graph(
         }
         r = await jev({"contrato": t}, q)
         ans = r["answers"]
-        return {
-            "ficha": {
-                "data_inicio": _pick(ans["data_inicio"], datas),
-                "prazo": _pick(ans["prazo"], prazos),
-                "valor_aluguel": _pick(ans["valor_aluguel"], valores),
-                "garantia": ans["garantia"]["choice"],
-                "indice": ans["indice"]["choice"],
-            },
-            "ficha_confianca": {k: v.get("confidence") for k, v in ans.items()},
-            "stats": {**state.get("stats", {}), "jev_tokens_ficha": _tokens(r)},
+        fi = {
+            "data_inicio": _pick(ans["data_inicio"], datas),
+            "prazo": _pick(ans["prazo"], prazos),
+            "valor_aluguel": _pick(ans["valor_aluguel"], valores),
+            "garantia": ans["garantia"]["choice"],
+            "indice": ans["indice"]["choice"],
         }
+        fc = {k: v.get("confidence") for k, v in ans.items()}
+        await rec(
+            state,
+            [
+                {
+                    "step": "ficha",
+                    "input_summary": {"candidates": {k: len(v) for k, v in cands.items()}},
+                    "decision": {"ficha": fi, "confianca": fc},
+                }
+            ],
+        )
+        return {"ficha": fi, "ficha_confianca": fc, "stats": {**state.get("stats", {}), "jev_tokens_ficha": _tokens(r)}}
 
     async def triar(state: AnalyzeMinutaState) -> dict[str, Any]:
         regras = _type_rules(state)
@@ -292,11 +366,30 @@ def build_analyze_minuta_graph(
 
         feitos = await _gather([checar(cl) for cl in clausulas])
         extra = 0
+        steps = []
         for cl, (checks, tk) in zip(clausulas, feitos, strict=True):
             cl["checks"] = [{"id": x["id"], "risco": x["risco"], "noul": x["noul"]} for x in checks]
             cl["confirmados"] = [x for x in checks if x["noul"] >= confirm_cutoff]
+            passou_triagem = cl["triado"]
             cl["triado"] = bool(cl["confirmados"])
             extra += tk
+            steps.append(
+                {
+                    "step": "triar",
+                    "clause_n": cl["n"],
+                    "input_summary": {"masked_chars": len(cl["texto"]), "excerpt": cl["texto"][:_EXCERPT]},
+                    "decision": {
+                        "tema": cl["tema"],
+                        "passou_triagem": passou_triagem,
+                        "checks": [{"id": c["id"], "noul": c["noul"]} for c in cl["checks"]],
+                        "confirm_cutoff": confirm_cutoff,
+                        "confirmados": [x["id"] for x in cl["confirmados"]],
+                    },
+                    "score": cl["risco"],
+                    "cutoff": triage_cutoff,
+                }
+            )
+        await rec(state, steps)
         triadas = sum(1 for c in clausulas if c["triado"])
         return {
             "clausulas": clausulas,
@@ -379,6 +472,28 @@ def build_analyze_minuta_graph(
             return sum(x[1] for x in res)
 
         tokens = sum(await _gather([buscar_clausula(cl) for cl in clausulas]))
+        await rec(
+            state,
+            [
+                {
+                    "step": "buscar",
+                    "clause_n": cl["n"],
+                    "input_summary": {"masked_chars": len(cl["texto"])},
+                    "decision": {
+                        "normas": [
+                            {"citacao": n["citacao"], "nota": n.get("nota"), "origem": n.get("origem")}
+                            for n in cl["normas"]
+                        ],
+                        "norm_cutoff": norm_cutoff,
+                    },
+                    "score": max((n["nota"] for n in cl["normas"] if n.get("nota") is not None), default=None),
+                    "cutoff": norm_cutoff,
+                    "cited_norms": [n["citacao"] for n in cl["normas"]],
+                }
+                for cl in clausulas
+                if cl.get("triado")
+            ],
+        )
         stats = state.get("stats", {})
         return {"clausulas": clausulas, "stats": {**stats, "jev_tokens": stats.get("jev_tokens", 0) + tokens}}
 
@@ -420,28 +535,62 @@ def build_analyze_minuta_graph(
             "nao_redigidas": len(fora),
             "falhas_redacao": sum(1 for a, _, _ in res if "erro" in a),
         }
+        await rec(
+            state,
+            [
+                {
+                    "step": "analisar",
+                    "input_summary": {"clausulas_com_risco": len(fila)},
+                    "decision": {
+                        "redigidas": len(redigir),
+                        "nao_redigidas": len(fora),
+                        "falhas": stats["falhas_redacao"],
+                        "redator_model": redator.get("model"),
+                    },
+                }
+            ],
+        )
         return {"clausulas": clausulas, "stats": stats}
 
     async def validar(state: AnalyzeMinutaState) -> dict[str, Any]:
         report, env, diag = validate_and_format(dict(state))
+        alerts = env.get("content", {}).get("alerts", [])
+        await rec(
+            state,
+            [
+                {
+                    "step": "validar",
+                    "input_summary": {"clausulas": len(state.get("clausulas") or [])},
+                    "decision": {
+                        "status": env.get("status"),
+                        "counts": env.get("content", {}).get("counts"),
+                        "alerts": [
+                            {"risk_id": a["risk_id"], "severity": a["severity"], "clause_index": a["clause_index"]}
+                            for a in alerts
+                        ],
+                        "funil": diag.get("funil"),
+                    },
+                    "cited_norms": sorted({n for a in alerts for n in a["legal_basis"]}),
+                }
+            ],
+        )
         await finish_analysis(
             pool, state["analysis_id"], status=env["status"], minuta_type=state.get("tipo"), report=env
         )
         return {"report_text": report, "report_envelope": env, "diagnostics": diag}
 
     builder = StateGraph(AnalyzeMinutaState)
-    builder.add_node("read_file", read_file)
-    builder.add_node("mascarar", mascarar)
-    builder.add_node("iniciar", iniciar)
-    builder.add_node("classificar", classificar)
-    builder.add_node("ficha", ficha)
-    builder.add_node("triar", triar)
-    builder.add_node("buscar", buscar)
-    builder.add_node("analisar", analisar)
-    builder.add_node("validar", validar)
-    builder.add_edge(START, "read_file")
-    builder.add_edge("read_file", "mascarar")
-    builder.add_edge("mascarar", "iniciar")
+    for name, fn in [
+        ("iniciar", iniciar),
+        ("classificar", classificar),
+        ("ficha", ficha),
+        ("triar", triar),
+        ("buscar", buscar),
+        ("analisar", analisar),
+        ("validar", validar),
+    ]:
+        builder.add_node(name, guarded(fn))
+    builder.add_edge(START, "iniciar")
     builder.add_edge("iniciar", "classificar")
     builder.add_conditional_edges("classificar", route_after_classificar, {"ficha": "ficha", "validar": "validar"})
     builder.add_edge("ficha", "triar")
