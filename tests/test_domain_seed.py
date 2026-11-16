@@ -7,7 +7,6 @@ import json
 from src.db import defaults
 from src.db.connection import init_db
 from src.db.seed import seed_defaults
-from src.graphs import analyze_minuta_graph as g
 from src.graphs.minuta_rules import DEFAULT_RISCOS, DEFAULT_TEMA_MAP, DEFAULT_TEMAS
 
 
@@ -49,9 +48,11 @@ async def test_seed_is_a_noop_once_the_type_exists_and_never_overwrites_edits(po
     assert await pool.fetchval("SELECT count(*) FROM domain_history") == history
 
 
-def test_seed_prompts_match_what_the_graph_uses_today():
-    """Guarda de deriva ate a M2a, quando o grafo passa a ler a tabela prompts."""
-    assert defaults.SISTEMA_REDIGIR == g.SISTEMA_REDIGIR
-    assert defaults.TRIAGEM_RISCO == g._Q_RISCO["instructions"]
-    assert defaults.REGULA_NORMA == g._Q_REGULA["regula"]["instructions"]
-    assert defaults.LOCACAO_CLASSIFIER == g._Q_TIPO["tipo"]["criteria"][defaults.LOCACAO_RESIDENCIAL]
+def test_confirmar_risco_template_reproduces_the_pre_m2a_instruction():
+    """O grafo antes da M2a montava a pergunta como prefixo + descricao do risco; o template tem de dar o mesmo."""
+    antigo = (
+        "`clausula` e trecho de contrato de locacao e `ficha` traz dados do mesmo contrato. "
+        "Considerando os dois, a clausula concretiza este risco: "
+    )
+    risco = "Multa {com chaves} de 3 alugueis"
+    assert defaults.CONFIRMAR_RISCO.replace("{risco}", risco) == antigo + risco
