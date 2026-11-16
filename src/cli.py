@@ -5,6 +5,7 @@ Comandos:
 * ``analyze <arquivo>``: uma analise; o arquivo e lido e mascarado localmente.
 * ``gold-run --label X``: analisa as minutas do gabarito (LEIA_MINUTAS_DIR) e mede P/R/F1.
 * ``gold-compare A B``: compara duas rodadas rotuladas (ex.: antes e depois de editar a matriz).
+* ``trace-usage``: tracos do mes na LangSmith contra o limite do plano (sai com 2 em alerta).
 
 ``--trace`` em ``analyze``/``gold-run`` envia o traco a LangSmith (so conteudo mascarado).
 """
@@ -53,6 +54,19 @@ async def gold_compare(pool: asyncpg.Pool, a: dict[str, str], b: dict[str, str])
 
 def _line(label: str, s: dict[str, Any]) -> str:
     return f"[{label}] P={s['precision']} R={s['recall']} F1={s['f1']} exact={s['exact_match']}"
+
+
+def _trace_usage(args: argparse.Namespace) -> int:
+    import os
+
+    from langsmith import Client
+
+    from src.tracing import trace_usage
+
+    project = args.project or os.environ.get("LANGSMITH_PROJECT") or "leia-lab"
+    res = trace_usage(Client(), project, limit=args.limit, warn_at=args.warn)
+    print(f"[{res['status']}] {res['traces']}/{res['limit']} tracos em {res['project']} desde {res['since']}")
+    return 0 if res["status"] == "ok" else 2
 
 
 async def _main(args: argparse.Namespace) -> None:
@@ -106,7 +120,14 @@ def main() -> None:
     c = sub.add_parser("gold-compare", help="compara duas rodadas rotuladas")
     c.add_argument("a")
     c.add_argument("b")
-    asyncio.run(_main(p.parse_args()))
+    u = sub.add_parser("trace-usage", help="tracos do mes na LangSmith contra o limite do plano")
+    u.add_argument("--limit", type=int, default=5000, help="limite do plano (Developer: 5.000/mes)")
+    u.add_argument("--warn", type=float, default=0.8, help="fracao do limite que dispara o alerta")
+    u.add_argument("--project", default=None)
+    args = p.parse_args()
+    if args.cmd == "trace-usage":
+        raise SystemExit(_trace_usage(args))
+    asyncio.run(_main(args))
 
 
 if __name__ == "__main__":

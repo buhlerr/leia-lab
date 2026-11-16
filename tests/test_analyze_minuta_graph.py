@@ -2,13 +2,14 @@ from src.db.connection import init_db
 from src.db.seed import seed_defaults
 from src.graphs.analyze_minuta_graph import analyze, build_analyze_minuta_graph
 from src.graphs.ingest_graph import build_ingest_graph
+from src.graphs.ingest_graph import ingest as run_ingest
 from tests._rules_helper import use_rules
 
 
 async def test_analyze_minuta_graph_end_to_end_supported_contract(pool, settings):
     await init_db(pool)
     ingest = build_ingest_graph(pool, settings)
-    await ingest.ainvoke(
+    await run_ingest(ingest, **
         {
             "raw_text": "Lei 10.192/2001, art. 2º - É nula de pleno direito a estipulação de reajuste em periodicidade inferior a um ano.",
             "filename": "lei-10192-2001-art-2.txt",
@@ -163,7 +164,7 @@ async def test_jev_concurrency_is_capped_across_nested_fanouts(pool, settings, m
     await init_db(pool)
     ingest = build_ingest_graph(pool, settings)
     for i in range(6):
-        await ingest.ainvoke({"raw_text": f"Norma {i}: reajuste do aluguel e prazo.", "filename": f"n{i}.txt", "doc_name": f"Norma {i}"})
+        await run_ingest(ingest, **{"raw_text": f"Norma {i}: reajuste do aluguel e prazo.", "filename": f"n{i}.txt", "doc_name": f"Norma {i}"})
     clausulas = "\n".join(
         f"Cláusula {i}ª - Do Reajuste: O aluguel será reajustado semestralmente pelo índice IGP-M, "
         "conforme ajustado entre as partes neste instrumento contratual de locação residencial."
@@ -179,7 +180,7 @@ async def test_jev_concurrency_is_capped_across_nested_fanouts(pool, settings, m
 async def test_tema_map_ids_resolve_to_citation_without_duplicates_or_empty_norms(pool, settings):
     await init_db(pool)
     ingest = build_ingest_graph(pool, settings)
-    await ingest.ainvoke(
+    await run_ingest(ingest, **
         {
             "raw_text": "Lei 10.192/2001, art. 2º - É nula a estipulação de reajuste inferior a um ano.",
             "filename": "lei.txt",

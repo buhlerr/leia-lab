@@ -1,7 +1,11 @@
 """Grafo LangGraph equivalente a ``Contratos - Ingestao.json``.
 
-``START -> read_file -> mask_personal_data -> split_text -> index_chunks -> END``.
+``START -> iniciar -> split_text -> index_chunks -> END``.
 Nenhum texto de minuta entra em logs ou mensagens de excecao.
+
+Privacidade (mesma regra do grafo de analise, M2b/M6): o grafo NUNCA ve texto cru.
+``prepare_ingest_input`` (usado por ``ingest()``) le e mascara FORA do grafo; o estado nao tem
+``raw_text`` nem ``file_path``, e ``iniciar`` recusa texto que nao esteja mascarado.
 """
 
 from __future__ import annotations
@@ -20,13 +24,11 @@ from src.rag.embeddings import embed_text
 from src.rag.hybrid_search import _to_pgvector_literal
 
 _EMPTY_TEXT_MSG = "text must be a non-empty string"
+_UNMASKED_MSG = "ingest input needs masked text; use ingest()/prepare_ingest_input() (raw text never enters the graph)"
 
 
 class IngestState(TypedDict, total=False):
-    file_path: str
-    raw_text: str
-    filename: str
-    doc_name: str
+    # Sem raw_text / file_path / filename / doc_name, de proposito (ver docstring do modulo).
     source: str
     chunk_size: int
     chunk_overlap: int
@@ -50,29 +52,48 @@ def _read_path(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def build_ingest_graph(pool: asyncpg.Pool, settings: Settings | None = None) -> Any:
-    """Compila o grafo de ingestao (mascara PII, segmenta e indexa no pgvector)."""
+async def prepare_ingest_input(
+    *,
+    raw_text: str | None = None,
+    file_path: str | Path | None = None,
+    filename: str = "",
+    doc_name: str = "",
+    **extra: Any,
+) -> dict[str, Any]:
+    """Le e mascara localmente. O dict devolvido e a UNICA coisa que entra no grafo.
+
+    ``extra`` passa adiante so campos de configuracao (``source``, ``chunk_size``, ``chunk_overlap``).
+    """
+    unknown = set(extra) - {"source", "chunk_size", "chunk_overlap"}
+    if unknown:
+        raise TypeError(f"campos desconhecidos: {sorted(unknown)}")
+    text = raw_text
+    if text is None and file_path is not None:
+        path = Path(file_path)
+        text = await asyncio.to_thread(_read_path, path)
+        filename = filename or path.name
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError(_EMPTY_TEXT_MSG)
+    return {"masked_text": mask_personal_data(text), "resolved_filename": resolve_doc_alias(filename, doc_name), **extra}
+
+
+async def ingest(graph: Any, *, config: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+    """``prepare_ingest_input`` + execucao do grafo; devolve o estado final."""
+    return await graph.ainvoke(await prepare_ingest_input(**kwargs), config)
+
+
+def build_ingest_graph(pool: asyncpg.Pool, settings: Settings | None = None, *, checkpointer: Any = None) -> Any:
+    """Compila o grafo de ingestao (segmenta e indexa no pgvector texto JA mascarado)."""
     cfg = settings or Settings()
 
-    async def read_file(state: IngestState) -> dict[str, Any]:
-        text = state.get("raw_text")
-        update: dict[str, Any] = {}
-        if text is None and state.get("file_path"):
-            path = Path(state["file_path"])
-            text = await asyncio.to_thread(_read_path, path)
-            update["filename"] = state.get("filename") or path.name
-        if not isinstance(text, str) or not text.strip():
-            raise ValueError(_EMPTY_TEXT_MSG)
-        update["raw_text"] = text
-        return update
-
-    async def mask_node(state: IngestState) -> dict[str, Any]:
-        return {
-            "masked_text": mask_personal_data(state["raw_text"]),
-            "resolved_filename": resolve_doc_alias(
-                state.get("filename", ""), state.get("doc_name", "")
-            ),
-        }
+    async def iniciar(state: IngestState) -> dict[str, Any]:
+        text = state.get("masked_text")
+        # Mascarar e idempotente: texto que muda ao ser mascarado de novo nao passou por prepare_ingest_input.
+        if not isinstance(text, str) or not text.strip() or mask_personal_data(text) != text:
+            raise ValueError(_UNMASKED_MSG)
+        if not state.get("resolved_filename"):
+            raise ValueError(_UNMASKED_MSG)
+        return {}
 
     async def split_node(state: IngestState) -> dict[str, Any]:
         chunks = split_contract_text(
@@ -105,13 +126,11 @@ def build_ingest_graph(pool: asyncpg.Pool, settings: Settings | None = None) -> 
         return {"doc_id": str(doc_id), "chunks_indexed": len(chunks)}
 
     builder = StateGraph(IngestState)
-    builder.add_node("read_file", read_file)
-    builder.add_node("mask_personal_data", mask_node)
+    builder.add_node("iniciar", iniciar)
     builder.add_node("split_text", split_node)
     builder.add_node("index_chunks", index_node)
-    builder.add_edge(START, "read_file")
-    builder.add_edge("read_file", "mask_personal_data")
-    builder.add_edge("mask_personal_data", "split_text")
+    builder.add_edge(START, "iniciar")
+    builder.add_edge("iniciar", "split_text")
     builder.add_edge("split_text", "index_chunks")
     builder.add_edge("index_chunks", END)
-    return builder.compile()
+    return builder.compile(checkpointer=checkpointer)

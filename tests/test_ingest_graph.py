@@ -1,7 +1,7 @@
 import pytest
 
 from src.db.connection import init_db
-from src.graphs.ingest_graph import build_ingest_graph
+from src.graphs.ingest_graph import build_ingest_graph, ingest
 from src.rag.embeddings import OFFLINE_EMBEDDING_MODEL
 
 
@@ -15,8 +15,9 @@ async def test_ingest_graph_masks_splits_and_indexes_into_pgvector(pool, setting
         "Cláusula 1ª - O prazo da locação é de 30 meses a partir de 01/02/2026.\n"
         "Cláusula 2ª - O aluguel mensal é de R$ 2.500,00 reajustado pelo IPCA."
     )
-    result = await graph.ainvoke(
-        {
+    result = await ingest(
+        graph,
+        **{
             "raw_text": raw_contract,
             "filename": "contrato_original.txt",
             "chunk_size": 120,
@@ -47,5 +48,5 @@ async def test_ingest_graph_rejects_empty_text(pool, settings):
     await init_db(pool)
     graph = build_ingest_graph(pool, settings)
     with pytest.raises(ValueError, match="non-empty"):
-        await graph.ainvoke({"raw_text": "   \n  ", "filename": "vazio.txt"})
+        await ingest(graph, raw_text="   \n  ", filename="vazio.txt")
     assert await pool.fetchval("SELECT count(*) FROM kb_docs") == 0

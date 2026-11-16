@@ -1,0 +1,12 @@
+[Unit]
+Description=Porta 8000 do admin da Leia so para os conectores Newt
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/leia-admin-firewall.sh
+
+[Install]
+WantedBy=multi-user.target

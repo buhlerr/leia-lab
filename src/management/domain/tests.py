@@ -349,6 +349,22 @@ class SettingsTests(TestCase):
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("DJANGO_SECRET_KEY", proc.stderr)
 
+    def test_atras_do_proxy_https_confia_no_forwarded_proto_e_usa_cookies_secure(self):
+        code = (
+            "from src.management.leia_admin import settings as s; "
+            "print(getattr(s, 'SECURE_PROXY_SSL_HEADER', None), getattr(s, 'SESSION_COOKIE_SECURE', False), "
+            "getattr(s, 'CSRF_COOKIE_SECURE', False))"
+        )
+        base = {k: v for k, v in os.environ.items() if k != "DJANGO_BEHIND_HTTPS_PROXY"}
+        base["DJANGO_SECRET_KEY"] = "x" * 50
+        out = {}
+        for flag in ("", "true"):
+            env = {**base, **({"DJANGO_BEHIND_HTTPS_PROXY": flag} if flag else {})}
+            proc = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, env=env, capture_output=True, text=True, check=True)
+            out[flag] = proc.stdout.strip()
+        self.assertEqual(out[""], "None False False")  # padrao: nao confia em cabecalho de proxy
+        self.assertEqual(out["true"], "('HTTP_X_FORWARDED_PROTO', 'https') True True")
+
     def test_hosts_padrao_so_localhost(self):
         env = {k: v for k, v in os.environ.items() if k != "DJANGO_ALLOWED_HOSTS"}
         env["DJANGO_SECRET_KEY"] = "x" * 50

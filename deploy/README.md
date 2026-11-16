@@ -1,7 +1,8 @@
 # Deploy do admin (Django) no CT 116
 
 O admin edita as regras (tipos, temas, matriz, prompts) e a base normativa, e mostra histórico,
-análises e trilha **só para leitura**. TLS e backup ficam na M6: até lá, use apenas na rede do homelab.
+análises e trilha **só para leitura**. Em produção fica atrás do Pangolin, em https://admin.rauvbr.com,
+com a porta 8000 fechada para a LAN (firewall em `deploy/firewall/`). Ver `docs/OPERACAO.md`.
 
 ## Uma vez, no Postgres (como dono das tabelas, ex. `leia`)
 
@@ -23,8 +24,9 @@ docker build -f deploy/Dockerfile -t leia-admin .
 docker run -d --name leia-admin --restart unless-stopped -p 8000:8000 \
   -e DATABASE_URL='postgresql://django_login:<senha>@<host>:5432/leia_lab' \
   -e DJANGO_SECRET_KEY='<50+ caracteres aleatórios>' \
-  -e DJANGO_ALLOWED_HOSTS='192.168.0.120' \
-  -e DJANGO_CSRF_TRUSTED_ORIGINS='http://192.168.0.120:8000' \
+  -e DJANGO_ALLOWED_HOSTS='admin.rauvbr.com' \
+  -e DJANGO_CSRF_TRUSTED_ORIGINS='https://admin.rauvbr.com' \
+  -e DJANGO_BEHIND_HTTPS_PROXY=true \
   -e DJANGO_SUPERUSER_USERNAME=admin -e DJANGO_SUPERUSER_PASSWORD='<senha>' \
   leia-admin
 ```
