@@ -18,7 +18,6 @@ GOLD = {
     ]
 }
 
-# the two committed clauses that declare expected_severity (g05 and g17 of gold/gold_set.json)
 SEV_GOLD = {
     "clauses": [
         {"id": "g05", "file": "locacao-02.txt", "clause_n": 6, "expected": ["R053", "R054"], "expected_severity": {"R054": "red"}},
@@ -143,13 +142,36 @@ def test_committed_severity_only_covers_declared_expected_ids():
     g = G.load_gold()
     declared = {c["id"]: c["expected_severity"] for c in g["clauses"] if "expected_severity" in c}
     assert declared == {
-        "g05": {"R054": "red"},
+        "g01": {"R029": "yellow", "R031": "yellow"},
+        "g02": {"R073": "red", "R076": "red"},
+        "g03": {"R101": "yellow", "R102": "yellow"},
+        "g04": {"R027": "red"},
+        "g05": {"R053": "yellow", "R054": "red"},
+        "g07": {"R102": "yellow"},
+        "g08": {"R028": "red", "R029": "yellow", "R119": "red", "R147": "yellow"},
+        "g09": {"R036": "red", "R038": "yellow"},
+        "g10": {"R073": "red", "R076": "red", "R077": "yellow", "R138": "yellow"},
+        "g11": {"R011": "red"},
+        "g12": {"R026": "yellow"},
+        "g13": {"R179": "red"},
+        "g14": {"R128": "red", "R131": "yellow"},
+        "g15": {"R174": "yellow"},
+        "g16": {"R107": "yellow"},
         "g17": {"R001": "yellow", "R006": "yellow", "R007": "red"},
+    }
+    v3_path = Path(G.GOLD_PATH).parents[1] / "data" / "matriz" / "v3.jsonl"
+    to_alert_sev = {"vermelho": "red", "amarelo": "yellow", "verde": "green"}
+    v3_sev = {
+        row["id"]: to_alert_sev[row["criticidade_sugerida"]]
+        for line in v3_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+        for row in (json.loads(line),)
     }
     for c in g["clauses"]:
         severities = c.get("expected_severity") or {}
-        assert set(severities) <= set(c["expected"]), f"{c['id']}: severidade de id nao esperado"
+        assert set(severities) == set(c["expected"]), f"{c['id']}: severidade difere dos ids esperados"
         assert set(severities.values()) <= {"red", "yellow", "green"}
+        assert {rid: v3_sev[rid] for rid in severities} == severities
 
 
 @pytest.mark.skipif(not os.environ.get("LEIA_MINUTAS_DIR"), reason="local masked minutas not configured")

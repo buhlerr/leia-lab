@@ -16,6 +16,9 @@ dependencies = [
     "psycopg[binary]>=3.2,<4",
     "gunicorn>=23,<24",
     "mlflow-tracing>=3.18,<4",
+    "fastapi>=0.165.0",
+    "python-multipart>=0.0.34",
+    "uvicorn>=0.54.0",
 ]
 
 [dependency-groups]

@@ -8,6 +8,7 @@ leia-lab analyses Brazilian residential lease contracts ("minutas"). A file is r
 - `src/graphs/`: LangGraph graphs (`analyze_minuta_graph`, `ingest_graph`, `query_graph`) and the pure clause rules (`minuta_rules`). `debug.py` exposes compiled graphs for visual debuggers.
 - `src/ingest/masking.py`: the privacy boundary. Raw text and real filenames never enter a graph, a row or a trace.
 - `src/db/`: asyncpg access, schema, seed and data versions. `src/rag/`: embeddings and hybrid search. `src/eval/gold.py`: gold-set scoring. `src/clients/`: OpenRouter LLM and Jev (TypeSafe) clients, with offline fallbacks when the key is empty.
+- `src/api/`: FastAPI HTTP API for the separate front-end: `python -m src.api` (uvicorn on `0.0.0.0:${PORT:-8080}`, bearer `LEIA_API_TOKEN`, OpenAPI contract at `/docs`). Pure core in `service.py`; uploads (.pdf/.docx/.txt) are masked in `prepare_input` before any external call, and the real filename never leaves the process.
 - `src/management/`: Django Admin (`leia_admin` project, `domain` app with `domain_history` audit).
 - `data/`: versioned base normativa and risk matrix. `gold/`: gold set. `deploy/`: production image, backup and firewall.
 - Git-ignored, local only, never commit or upload: `leia-minutas-teste-mascaradas/` (test minutas, `LEIA_MINUTAS_DIR`), `leia-kb-legislacao/` (a separate repo with raw legislation sources), `.local/` (CLI runs and verification evidence), `.planning/`.
