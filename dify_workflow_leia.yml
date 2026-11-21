@@ -1,0 +1,337 @@
+app:
+  description: Workflow de analise de minutas contratuais portado do leia-lab com mascaramento
+    de PII, classificacao, extracao de ficha e redacao juridica de riscos.
+  icon: ⚖️
+  icon_background: '#E8F5E9'
+  mode: workflow
+  name: Leia Lab - Analise de Minutas
+kind: app
+version: 0.1.5
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .txt
+      - .docx
+      - .pdf
+      allowed_file_types:
+      - document
+      allowed_file_upload_methods:
+      - local_file
+      enabled: false
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+    retrieval_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+  graph:
+    edges:
+    - data:
+        sourceType: start
+        targetType: code
+      id: start_to_mask
+      source: start_node
+      target: node_mask
+    - data:
+        sourceType: code
+        targetType: llm
+      id: mask_to_classify
+      source: node_mask
+      target: node_classify
+    - data:
+        sourceType: llm
+        targetType: if-else
+      id: classify_to_if
+      source: node_classify
+      target: node_if_supported
+    - data:
+        sourceType: if-else
+        targetType: llm
+      id: if_to_ficha
+      source: node_if_supported
+      sourceHandle: 'true'
+      target: node_ficha
+    - data:
+        sourceType: llm
+        targetType: llm
+      id: ficha_to_analisar
+      source: node_ficha
+      target: node_analisar
+    - data:
+        sourceType: llm
+        targetType: code
+      id: analisar_to_format
+      source: node_analisar
+      target: node_format
+    - data:
+        sourceType: code
+        targetType: end
+      id: format_to_end_success
+      source: node_format
+      target: node_end_success
+    - data:
+        sourceType: if-else
+        targetType: end
+      id: if_to_end_unsupported
+      source: node_if_supported
+      sourceHandle: 'false'
+      target: node_end_unsupported
+    nodes:
+    - data:
+        desc: Entrada do contrato e do apelido do arquivo
+        title: Iniciar
+        type: start
+        variables:
+        - label: raw_text
+          max_length: 500000
+          required: true
+          type: paragraph
+          variable: raw_text
+        - default: minuta.txt
+          label: filename
+          max_length: 120
+          required: false
+          type: text-input
+          variable: filename
+      id: start_node
+      position:
+        x: 40
+        y: 260
+      positionAbsolute:
+        x: 40
+        y: 260
+      type: custom
+    - data:
+        code: "import re\nimport hashlib\n\ndef main(raw_text: str, filename: str) -> dict:\n    # Mascaramento equivalente a src.ingest.masking (M2b)\n    text = re.sub(r\"\\d{3}\\.\\d{3}\\.\\d{3}-\\d{2}\", \"[CPF]\", raw_text)\n    text = re.sub(r\"\\b\\d{11}\\b\", \"[CPF]\", text)\n    text = re.sub(r\"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\\.[a-zA-Z0-9-.]+\", \"[EMAIL]\", text)\n    text = re.sub(r\"(?i)\\b(LOCADOR|LOCAT[AÁ]RIO|FIADOR|PARTE):?\\s*([A-ZÀ-Ú][a-zà-ú]+(?:\\s+[A-ZÀ-Ú][a-zà-ú]+)+)\", r\"\\1: [NOME]\", text)\n    \n    sha = hashlib.sha256(filename.encode('utf-8')).hexdigest()[:8]\n    ext = \".txt\" if \".\" not in filename else filename[filename.rfind('.'):]\n    alias = f\"documento-{sha}{ext}\"\n    \n    return {\n        \"masked_text\": text,\n        \"alias\": alias\n    }\n"
+        code_language: python3
+        desc: Mascaramento estrito de dados pessoais (CPF, Nome, Email) e criacao de apelido
+        outputs:
+          alias:
+            children: null
+            type: string
+          masked_text:
+            children: null
+            type: string
+        title: Mascaramento LGPD
+        type: code
+        variables:
+        - value_selector:
+          - start_node
+          - raw_text
+          variable: raw_text
+        - value_selector:
+          - start_node
+          - filename
+          variable: filename
+      id: node_mask
+      position:
+        x: 280
+        y: 260
+      positionAbsolute:
+        x: 280
+        y: 260
+      type: custom
+    - data:
+        context:
+          enabled: false
+        desc: Classifica se o documento e locacao residencial ou nao suportado
+        model:
+          completion_params:
+            temperature: 0.1
+          mode: chat
+          name: gpt-4o-mini
+          provider: openai
+        prompt_template:
+        - role: system
+          text: 'Voce e um classificador juridico estrito. Responda em uma unica palavra: "locacao_residencial" se o documento for um contrato de locacao de imovel residencial urbano. Responda "nao_suportado" se for qualquer outro tipo de documento, contrato comercial, lei ou peticao.'
+        - role: user
+          text: 'Documento:
+
+            {{#node_mask.masked_text#}}'
+        title: Classificar Tipo
+        type: llm
+        vision:
+          enabled: false
+      id: node_classify
+      position:
+        x: 520
+        y: 260
+      positionAbsolute:
+        x: 520
+        y: 260
+      type: custom
+    - data:
+        cases:
+        - case_id: 'true'
+          conditions:
+          - comparison_operator: contains
+            value: locacao_residencial
+            variable_selector:
+            - node_classify
+            - text
+          id: 'true'
+          logical_operator: and
+        desc: Desvia minutas nao suportadas
+        title: Suportado?
+        type: if-else
+      id: node_if_supported
+      position:
+        x: 760
+        y: 260
+      positionAbsolute:
+        x: 760
+        y: 260
+      type: custom
+    - data:
+        context:
+          enabled: false
+        desc: Extrai campos estruturados do contrato
+        model:
+          completion_params:
+            response_format: json_object
+            temperature: 0.1
+          mode: chat
+          name: gpt-4o-mini
+          provider: openai
+        prompt_template:
+        - role: system
+          text: 'Extraia os dados contratuais do texto e retorne estritamente um JSON com as chaves: "data_inicio" (ex: "01/04/2026"), "prazo" (ex: "30 meses"), "valor_aluguel" (ex: "R$ 2.800,00"), "garantia" ("caucao", "fiador", "seguro_fianca", "titulo" ou "sem_garantia"), "indice" ("igpm", "ipca", "inpc" ou "outro").'
+        - role: user
+          text: 'Contrato:
+
+            {{#node_mask.masked_text#}}'
+        title: Ficha do Contrato
+        type: llm
+        vision:
+          enabled: false
+      id: node_ficha
+      position:
+        x: 1020
+        y: 180
+      positionAbsolute:
+        x: 1020
+        y: 180
+      type: custom
+    - data:
+        context:
+          enabled: false
+        desc: Aplica prompt de redacao e deteccao de riscos do leia-lab
+        model:
+          completion_params:
+            response_format: json_object
+            temperature: 0.1
+          mode: chat
+          name: gpt-4o-mini
+          provider: openai
+        prompt_template:
+        - role: system
+          text: 'Voce redige, para um revisor juridico, a explicacao de riscos em uma minuta de locacao residencial urbana com base na Lei 8.245/1991 e no Codigo Civil. Marcas como [NOME] e [CPF] sao anonimizacao.
+
+            Responda exclusivamente JSON no formato: {"alertas": [{"id": "id do risco", "trecho": "copia literal da clausula", "resumo": "frase curta do perigo", "detalhe": "explicacao do risco e recomendacao pratica", "gravidade": "alta|media|baixa", "base_legal": ["Lei 8.245/1991, art. X"]}]}.
+
+            Analise riscos tipicos como: renuncia de benfeitorias necessarias, prazo de desocupacao abusivo, cobranca de taxa antecipada de reserva/arras, reajuste semestral ou por indice desfavoravel, cobranca de despesas extraordinarias de condominio ao locatario, ou dupla garantia locaticia.'
+        - role: user
+          text: 'Ficha Cadastral:
+
+            {{#node_ficha.text#}}
+
+
+            Texto Mascarado da Minuta:
+
+            {{#node_mask.masked_text#}}'
+        title: Analisar Riscos
+        type: llm
+        vision:
+          enabled: false
+      id: node_analisar
+      position:
+        x: 1260
+        y: 180
+      positionAbsolute:
+        x: 1260
+        y: 180
+      type: custom
+    - data:
+        code: "import json\n\ndef main(alias: str, ficha_raw: str, analise_raw: str) -> dict:\n    try:\n        ficha = json.loads(ficha_raw)\n    except Exception:\n        ficha = {\"raw\": ficha_raw}\n        \n    try:\n        analise = json.loads(analise_raw)\n        alertas = analise.get(\"alertas\", [])\n    except Exception:\n        alertas = []\n        \n    counts = {\n        \"alta\": sum(1 for a in alertas if a.get(\"gravidade\") == \"alta\"),\n        \"media\": sum(1 for a in alertas if a.get(\"gravidade\") == \"media\"),\n        \"baixa\": sum(1 for a in alertas if a.get(\"gravidade\") == \"baixa\")\n    }\n    \n    envelope = {\n        \"status\": \"done\",\n        \"document\": alias,\n        \"ficha\": ficha,\n        \"counts\": counts,\n        \"total_alertas\": len(alertas),\n        \"alertas\": alertas\n    }\n    \n    return {\n        \"resultado\": json.dumps(envelope, ensure_ascii=False, indent=2),\n        \"status\": \"done\",\n        \"total_alertas\": len(alertas)\n    }\n"
+        code_language: python3
+        desc: Formata o relatorio final no padrao JSON envelope
+        outputs:
+          resultado:
+            children: null
+            type: string
+          status:
+            children: null
+            type: string
+          total_alertas:
+            children: null
+            type: number
+        title: Validar e Formatar
+        type: code
+        variables:
+        - value_selector:
+          - node_mask
+          - alias
+          variable: alias
+        - value_selector:
+          - node_ficha
+          - text
+          variable: ficha_raw
+        - value_selector:
+          - node_analisar
+          - text
+          variable: analise_raw
+      id: node_format
+      position:
+        x: 1500
+        y: 180
+      positionAbsolute:
+        x: 1500
+        y: 180
+      type: custom
+    - data:
+        desc: Entrega o relatorio validado
+        outputs:
+        - value_selector:
+          - node_format
+          - resultado
+          variable: relatorio_analise
+        - value_selector:
+          - node_format
+          - total_alertas
+          variable: total_alertas
+        title: Concluido
+        type: end
+      id: node_end_success
+      position:
+        x: 1740
+        y: 180
+      positionAbsolute:
+        x: 1740
+        y: 180
+      type: custom
+    - data:
+        desc: Encerra analise para documentos nao suportados
+        outputs:
+        - value_selector:
+          - node_classify
+          - text
+          variable: motivo_rejeicao
+        title: Nao Suportado
+        type: end
+      id: node_end_unsupported
+      position:
+        x: 1020
+        y: 360
+      positionAbsolute:
+        x: 1020
+        y: 360
+      type: custom
