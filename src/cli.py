@@ -11,7 +11,7 @@ Comandos:
 * ``gold-compare A B``: compara duas rodadas rotuladas (ex.: antes e depois de editar a matriz).
 * ``trace-usage``: tracos do mes na LangSmith contra o limite do plano (sai com 2 em alerta).
 
-``--trace`` em ``analyze``/``gold-run`` envia o traco a LangSmith (so conteudo mascarado).
+``--trace`` em ``analyze``/``gold-run`` envia o traco aos backends configurados (LangSmith/MLflow, so conteudo mascarado).
 """
 
 from __future__ import annotations
@@ -83,9 +83,9 @@ async def _main(args: argparse.Namespace) -> None:
     settings = Settings()
     tracing: contextlib.AbstractContextManager[Any] = contextlib.nullcontext()
     if getattr(args, "trace", False):
-        from src.tracing import langsmith_tracing
+        from src.tracing import tracing_session
 
-        tracing = langsmith_tracing()
+        tracing = tracing_session()
     pool = await asyncpg.create_pool(settings.DATABASE_URL, min_size=1, max_size=4)
     try:
         with tracing:
@@ -145,7 +145,9 @@ def main() -> None:
     g = sub.add_parser("gold-run", help="analisa as minutas do gabarito (LEIA_MINUTAS_DIR) e pontua")
     g.add_argument("--label", required=True)
     for cmd in (a, g):
-        cmd.add_argument("--trace", action="store_true", help="envia o traco a LangSmith (so conteudo mascarado)")
+        cmd.add_argument(
+            "--trace", action="store_true", help="envia o traco a LangSmith e/ou MLflow (so conteudo mascarado)"
+        )
     c = sub.add_parser("gold-compare", help="compara duas rodadas rotuladas")
     c.add_argument("a")
     c.add_argument("b")

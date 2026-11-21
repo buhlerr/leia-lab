@@ -1,7 +1,0 @@
-schema: 1
-id: leia-lab
-title: Leia lab
-tenant: _default
-template: adopted@1
-docs_mode: plain
-features: {}

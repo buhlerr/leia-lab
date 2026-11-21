@@ -1,36 +1,80 @@
-"""Rastreio na LangSmith (ADR-0002): a vista de depuracao, nao a fonte da auditoria.
+"""Rastreio na LangSmith e/ou MLflow (ADR-0002): vista de depuracao, nao fonte da auditoria.
 
 A auditoria continua na trilha do Postgres (``analysis_trail``). O rastreio mostra o grafo e cada
 chamada externa; so conteudo MASCARADO chega aqui, porque o grafo nunca ve texto cru (M2b).
 
-Ligar: ``with langsmith_tracing(): ...`` (CLI: ``--trace``). Le ``LANGSMITH_API_KEY`` e
-``LANGSMITH_PROJECT`` das variaveis de ambiente (de usuario no Windows), nunca de arquivo do repo.
-Atencao: o SDK tambem obedece a ``LANGSMITH_TRACING=true`` no ambiente e, com ela, rastrearia toda
-execucao. Deixe essa variavel desligada e ligue o rastreio so por este bloco.
+Ligar em modo dual: ``with tracing_session(): ...`` (CLI: ``--trace``). Le ``LANGSMITH_API_KEY`` /
+``LANGSMITH_PROJECT`` e ``MLFLOW_TRACKING_URI`` / ``MLFLOW_EXPERIMENT_NAME`` das variaveis de
+ambiente, nunca de arquivo do repo.
+Atencao: o SDK da LangSmith tambem obedece a ``LANGSMITH_TRACING=true`` no ambiente; deixe essa
+variavel desligada e ligue o rastreio so por este bloco.
 
 Os clientes Jev e LLM sao httpx cru, sem instrumentacao automatica: ``client_span`` cria um span
-por chamada. Ele recebe uma lista de argumentos PERMITIDOS: ``settings`` (chaves de API, senha do
-banco no DATABASE_URL) nunca entra no traco.
+por chamada nos backends ativos. Ele recebe uma lista de argumentos PERMITIDOS: ``settings``
+(chaves de API, senha do banco no DATABASE_URL) nunca entra no traco.
 """
 
 from __future__ import annotations
 
+import inspect
 import os
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
+from contextvars import ContextVar
+from functools import wraps
 from typing import Any
 
+import mlflow
+import mlflow.langchain
 from langsmith import Client, traceable
 from langsmith.run_helpers import get_current_run_tree, tracing_context
+from mlflow.entities import SpanType
+
+_MLFLOW_ACTIVE: ContextVar[bool] = ContextVar("_mlflow_active", default=False)
 
 
 def client_span(name: str, allowed: tuple[str, ...]) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Span ``llm`` da LangSmith que so registra os argumentos em ``allowed``."""
+    """Span ``llm`` nos backends ativos (LangSmith / MLflow) registrando so ``allowed``."""
 
     def keep(inputs: dict[str, Any]) -> dict[str, Any]:
         return {k: v for k, v in inputs.items() if k in allowed}
 
-    return traceable(run_type="llm", name=name, process_inputs=keep)
+    def decorate(fn: Callable[..., Any]) -> Callable[..., Any]:
+        ls_fn = traceable(run_type="llm", name=name, process_inputs=keep)(fn)
+        sig = inspect.signature(fn)
+
+        def _filtered_inputs(args: tuple[Any, ...], kwargs: dict[str, Any]) -> dict[str, Any]:
+            bound = sig.bind_partial(*args, **kwargs)
+            bound.apply_defaults()
+            return keep(dict(bound.arguments))
+
+        if inspect.iscoroutinefunction(fn):
+
+            @wraps(fn)
+            async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                if not _MLFLOW_ACTIVE.get():
+                    return await ls_fn(*args, **kwargs)
+                with mlflow.start_span(name=name, span_type=SpanType.LLM) as span:
+                    span.set_inputs(_filtered_inputs(args, kwargs))
+                    out = await ls_fn(*args, **kwargs)
+                    span.set_outputs(out)
+                    return out
+
+            return async_wrapper
+
+        @wraps(fn)
+        def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+            if not _MLFLOW_ACTIVE.get():
+                return ls_fn(*args, **kwargs)
+            with mlflow.start_span(name=name, span_type=SpanType.LLM) as span:
+                span.set_inputs(_filtered_inputs(args, kwargs))
+                out = ls_fn(*args, **kwargs)
+                span.set_outputs(out)
+                return out
+
+        return sync_wrapper
+
+    return decorate
 
 
 def tag_span(**metadata: Any) -> None:
@@ -38,11 +82,15 @@ def tag_span(**metadata: Any) -> None:
     run = get_current_run_tree()
     if run is not None:
         run.metadata.update(metadata)
+    if _MLFLOW_ACTIVE.get():
+        span = mlflow.get_current_active_span()
+        if span is not None:
+            span.set_attributes({k: v for k, v in metadata.items() if v is not None})
 
 
 @contextmanager
 def langsmith_tracing(client: Client | None = None, project_name: str | None = None) -> Iterator[Client]:
-    """Liga o rastreio dentro do bloco e espera o envio ao sair."""
+    """Liga o rastreio na LangSmith dentro do bloco e espera o envio ao sair."""
     if client is None:
         if not os.environ.get("LANGSMITH_API_KEY"):
             raise RuntimeError("LANGSMITH_API_KEY ausente (variavel de usuario do Windows)")
@@ -53,6 +101,60 @@ def langsmith_tracing(client: Client | None = None, project_name: str | None = N
             yield client
         finally:
             client.flush()
+
+
+@contextmanager
+def mlflow_tracing(tracking_uri: str | None = None, experiment_name: str | None = None) -> Iterator[str]:
+    """Liga o rastreio na MLflow dentro do bloco e faz flush ao sair."""
+    uri = tracking_uri or os.environ.get("MLFLOW_TRACKING_URI")
+    if not uri:
+        raise RuntimeError("MLFLOW_TRACKING_URI ausente (variavel de ambiente)")
+    exp = experiment_name or os.environ.get("MLFLOW_EXPERIMENT_NAME") or "leia-lab"
+    prev_uri = mlflow.get_tracking_uri()
+    token = _MLFLOW_ACTIVE.set(True)
+    try:
+        mlflow.set_tracking_uri(uri)
+        mlflow.tracing.enable()
+        mlflow.set_experiment(exp)
+        mlflow.langchain.autolog(run_tracer_inline=True, silent=True)
+        yield uri
+    finally:
+        _MLFLOW_ACTIVE.reset(token)
+        try:
+            mlflow.langchain.autolog(disable=True, silent=True)
+        finally:
+            try:
+                mlflow.flush_trace_async_logging()
+            finally:
+                mlflow.set_tracking_uri(prev_uri)
+
+
+@contextmanager
+def tracing_session(
+    *,
+    langsmith_client: Client | None = None,
+    langsmith_project: str | None = None,
+    mlflow_uri: str | None = None,
+    mlflow_experiment: str | None = None,
+) -> Iterator[dict[str, Any]]:
+    """Liga LangSmith, MLflow ou ambos em paralelo conforme as variaveis configuradas."""
+    use_ls = langsmith_client is not None or bool(os.environ.get("LANGSMITH_API_KEY"))
+    use_ml = mlflow_uri is not None or bool(os.environ.get("MLFLOW_TRACKING_URI"))
+    if not use_ls and not use_ml:
+        raise RuntimeError(
+            "Nenhum backend de rastreio configurado: defina LANGSMITH_API_KEY e/ou MLFLOW_TRACKING_URI"
+        )
+    active: dict[str, Any] = {"langsmith": None, "mlflow": None}
+    with ExitStack() as stack:
+        if use_ls:
+            active["langsmith"] = stack.enter_context(
+                langsmith_tracing(client=langsmith_client, project_name=langsmith_project)
+            )
+        if use_ml:
+            active["mlflow"] = stack.enter_context(
+                mlflow_tracing(tracking_uri=mlflow_uri, experiment_name=mlflow_experiment)
+            )
+        yield active
 
 
 def month_start(now: Any = None) -> Any:

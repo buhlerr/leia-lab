@@ -14,7 +14,7 @@ from src.config import Settings
 from src.db.connection import init_db
 from src.db.seed import seed_defaults
 from src.graphs.analyze_minuta_graph import analyze, build_analyze_minuta_graph
-from src.tracing import langsmith_tracing
+from src.tracing import langsmith_tracing, mlflow_tracing, tracing_session
 from tests._capture import CaptureServer, capture  # noqa: F401 - fixture
 from tests.conftest import TEST_DATABASE_URL
 from tests.test_trail_privacy import FILE_NAME, RAW, SECRETS
@@ -72,6 +72,69 @@ def test_tracing_refuses_to_start_without_an_api_key(monkeypatch):
     monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
     with pytest.raises(RuntimeError, match="LANGSMITH_API_KEY"), langsmith_tracing():
         pass
+
+
+async def test_dual_tracing_sends_masked_nested_traces_to_both_backends(seeded, settings, capture):
+    db_password = urlsplit(TEST_DATABASE_URL).password
+    graph = build_analyze_minuta_graph(pool=seeded, settings=settings)
+    with tracing_session(
+        langsmith_client=capture.client,
+        langsmith_project="leia-lab-teste",
+        mlflow_uri=capture.mlflow_uri,
+        mlflow_experiment="leia-lab-teste",
+    ) as active:
+        assert active["langsmith"] is capture.client and active["mlflow"] == capture.mlflow_uri
+        outs = [await analyze(graph, raw_text=RAW, filename=FILE_NAME)]
+
+    for blob in (capture.blob.lower(), capture.mlflow_blob.lower()):
+        assert blob, "ambos os backends precisam receber payload"
+        assert [s for s in SECRETS if s.lower().encode() in blob] == []
+        assert b"[nome]" in blob and b"[cpf]" in blob
+        assert outs[0]["filename"].lower().encode() in blob
+        assert b"analisar_minuta" in blob and b"call_jev" in blob and b"chat_completion" in blob
+        assert db_password and db_password.encode() not in blob
+        assert b"database_url" not in blob and b"typesafe_api_key" not in blob
+
+    assert len(capture.trace_ids()) == 1
+    assert len(capture.mlflow_trace_ids()) == 1
+    otlp_trace_ids = {sp["traceId"] for sp in capture.mlflow_spans}
+    assert len(otlp_trace_ids) == 1
+    jev_spans = [sp for sp in capture.mlflow_spans if sp.get("name") == "call_jev"]
+    assert len(jev_spans) > 1 and all(sp.get("parentSpanId") for sp in jev_spans)
+
+
+@respx.mock
+async def test_tracing_session_works_with_mlflow_only_and_enforces_allowlist(capture, monkeypatch):
+    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", capture.mlflow_uri)
+    monkeypatch.setenv("MLFLOW_EXPERIMENT_NAME", "leia-lab-teste")
+    s = Settings(TYPESAFE_API_KEY="sk-SEGREDO-DO-JEV", TYPESAFE_BASE_URL="https://jev.invalid/v1/systemone")
+    respx.post(s.TYPESAFE_BASE_URL).mock(return_value=httpx.Response(200, json={"answers": {"q": {"noul": 0.9}}}))
+    with tracing_session() as active:
+        assert active["langsmith"] is None and active["mlflow"] == capture.mlflow_uri
+        await call_jev({"clausula": "texto [NOME]"}, {"q": {"type": "noul", "instructions": "?"}}, s)
+    assert capture.blob == b""
+    assert b"[NOME]" in capture.mlflow_blob and b"call_jev" in capture.mlflow_blob
+    assert b"SEGREDO" not in capture.mlflow_blob and b"TYPESAFE_API_KEY" not in capture.mlflow_blob
+
+
+def test_tracing_session_refuses_to_start_when_no_backend_is_configured(monkeypatch):
+    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    with pytest.raises(RuntimeError, match="LANGSMITH_API_KEY"), tracing_session():
+        pass
+
+
+@respx.mock
+async def test_mlflow_tracing_does_not_leak_after_context_exit(capture, monkeypatch):
+    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+    s = Settings(TYPESAFE_API_KEY="", TYPESAFE_BASE_URL="https://jev.invalid/v1/systemone")
+    with mlflow_tracing(tracking_uri=capture.mlflow_uri, experiment_name="leia-lab-teste"):
+        await call_jev({"clausula": "texto [NOME]"}, {"q": {"type": "noul", "instructions": "?"}}, s)
+    assert capture.mlflow_bodies
+    capture.mlflow_bodies.clear()
+    await call_jev({"clausula": "texto [NOME]"}, {"q": {"type": "noul", "instructions": "?"}}, s)
+    assert capture.mlflow_bodies == []
 
 
 # ---------------------------------------------------------------- gabarito no CLI

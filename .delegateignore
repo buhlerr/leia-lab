@@ -22,14 +22,6 @@ leia-kb-legislacao/**
 
 # --- Untracked local projects and tooling in the main checkout ---
 mcp-pangolin/**
-firefish/**
-.great_cto/**
-CONTEXT.md
-project.yaml
-
-# --- Nested worktrees (also listed in .git/info/exclude) ---
-acornworm/**
-scorpionfish/**
 
 # --- Secrets and local state ---
 .env*
