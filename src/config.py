@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     TYPESAFE_API_KEY: str = ""
     TYPESAFE_BASE_URL: str = "https://api.typesafe.ai/v1/systemone"
     JEV_MODEL: str = "jev-1.14.0"
+    # Token de servico da API (src/api): bearer exigido em /v1/analyses. A API
+    # recusa subir sem ele. Nao tem relacao com os logins do Django Admin.
+    LEIA_API_TOKEN: str = ""
 
     model_config = SettingsConfigDict(
         env_file=".env",

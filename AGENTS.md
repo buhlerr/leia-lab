@@ -127,6 +127,10 @@ bd prime                # Refresh Beads context
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md for details and anti-patterns.
 <!-- END BEADS CODEX SETUP -->
 
+## API para o FE
+
+- `src/api/`: API HTTP FastAPI para a camada FE separada: `python -m src.api` (uvicorn em `0.0.0.0:${PORT:-8080}`, token de servico `LEIA_API_TOKEN`, contrato em `/docs`). Nucleo puro em `src/api/service.py`; uploads (.pdf/.docx/.txt) sao mascarados em `prepare_input` antes de qualquer chamada externa e o nome real do arquivo nunca sai do processo.
+
 ## Agent skills
 
 ### Issue tracker
