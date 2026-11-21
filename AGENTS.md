@@ -1,51 +1,30 @@
 # Agent Instructions
 
-This project uses **bd** (beads) for issue tracking. Run `bd prime` for full workflow context.
+leia-lab analyses Brazilian residential lease contracts ("minutas"). A file is read and masked locally, a LangGraph pipeline checks each clause against a versioned risk matrix in Postgres, and every run leaves an immutable `analyses` row plus an append-only `analysis_trail`. Users touch it through the CLI; the risk matrix is edited in a Django Admin. Domain terms: `GLOSSARY.md`. Decisions: `docs/adr/`. Production ops (homelab CT 116, backups, Pangolin): `docs/OPERACAO.md`.
 
-> **Architecture in one line:** Issues live in a local Dolt database
-> (`.beads/dolt/`); cross-machine sync uses `bd dolt push/pull` (a
-> git-compatible protocol), stored under `refs/dolt/data` on your git
-> remote — separate from `refs/heads/*` where your code lives.
-> `.beads/issues.jsonl` is a passive export, not the wire protocol.
->
-> See [sync-concepts](https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md)
-> for the one-screen overview and anti-patterns (don't treat JSONL as the
-> source of truth; don't `bd import` during normal operation; don't
-> reach for third-party Dolt hosting before trying the default).
+## Layout
 
-## Quick Reference
+- `src/cli.py`: entry point (`python -m src.cli init|init --real|analyze|gold-run|gold-compare|apply-matrix|data-versions|trace-usage`).
+- `src/graphs/`: LangGraph graphs (`analyze_minuta_graph`, `ingest_graph`, `query_graph`) and the pure clause rules (`minuta_rules`). `debug.py` exposes compiled graphs for visual debuggers.
+- `src/ingest/masking.py`: the privacy boundary. Raw text and real filenames never enter a graph, a row or a trace.
+- `src/db/`: asyncpg access, schema, seed and data versions. `src/rag/`: embeddings and hybrid search. `src/eval/gold.py`: gold-set scoring. `src/clients/`: OpenRouter LLM and Jev (TypeSafe) clients, with offline fallbacks when the key is empty.
+- `src/management/`: Django Admin (`leia_admin` project, `domain` app with `domain_history` audit).
+- `data/`: versioned base normativa and risk matrix. `gold/`: gold set. `deploy/`: production image, backup and firewall.
+- Git-ignored, local only, never commit or upload: `leia-minutas-teste-mascaradas/` (test minutas, `LEIA_MINUTAS_DIR`), `leia-kb-legislacao/` (a separate repo with raw legislation sources), `.local/` (CLI runs and verification evidence), `.planning/`.
+
+## Build and test
+
+Windows, Python 3.12+ in `.venv` managed by uv. Run commands from the repo root in Git Bash.
 
 ```bash
-bd ready              # Find available work
-bd show <id>          # View issue details
-bd update <id> --claim  # Claim work atomically
-bd close <id>         # Complete work
-bd dolt push          # Push beads data to remote
+uv sync                                   # install
+.venv/Scripts/python.exe -m pytest        # tests; need Postgres (TEST_DATABASE_URL, default localhost:5433/leia_lab_test)
+docker compose up -d postgres             # local Postgres 17 + pgvector on 5433, if the homelab one is not used
 ```
 
-## Non-Interactive Shell Commands
+The suite drops and recreates `public` in the test database; `tests/_db_guard.py` refuses any database not ending in `_test`. To prove a change end to end, use the `verify-leia-lab` skill (`.claude/skills/verify-leia-lab/`), not bare `python -m src.cli`: it pins a disposable `leia_lab_verify_<id>` database and blanks paid keys.
 
-**ALWAYS use non-interactive flags** with file operations to avoid hanging on confirmation prompts.
-
-Shell commands like `cp`, `mv`, and `rm` may be aliased to include `-i` (interactive) mode on some systems, causing the agent to hang indefinitely waiting for y/n input.
-
-**Use these forms instead:**
-```bash
-# Force overwrite without prompting
-cp -f source dest           # NOT: cp source dest
-mv -f source dest           # NOT: mv source dest
-rm -f file                  # NOT: rm file
-
-# For recursive operations
-rm -rf directory            # NOT: rm -r directory
-cp -rf source dest          # NOT: cp -r source dest
-```
-
-**Other commands that may prompt:**
-- `scp` - use `-o BatchMode=yes` for non-interactive
-- `ssh` - use `-o BatchMode=yes` to fail instead of prompting
-- `apt-get` - use `-y` flag
-- `brew` - use `HOMEBREW_NO_AUTO_UPDATE=1` env var
+Secrets come from Shelve (`shelve run --env production -- <cmd>` in Git Bash). Paid paths (real OpenRouter/TypeSafe keys, `--trace`) spend money; ask first.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:46cd31e7 -->
 ## Beads Issue Tracker
@@ -102,30 +81,6 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 - Do not commit or push without clear authority from the active profile or the current user request.
 - If a required sync or push is blocked, stop and report the exact command and error.
 <!-- END BEADS INTEGRATION -->
-
-<!-- BEGIN BEADS CODEX SETUP: generated by bd setup codex -->
-## Beads Issue Tracker
-
-Use Beads (`bd`) for durable task tracking in repositories that include it. Use the `beads` skill at `.agents/skills/beads/SKILL.md` (project install) or `~/.agents/skills/beads/SKILL.md` (global install) for Beads workflow guidance, then use the `bd` CLI for issue operations.
-
-### Quick Reference
-
-```bash
-bd ready                # Find available work
-bd show <id>            # View issue details
-bd update <id> --claim  # Claim work
-bd close <id>           # Complete work
-bd prime                # Refresh Beads context
-```
-
-### Rules
-
-- Use `bd` for all task tracking; do not create markdown TODO lists.
-- Run `bd prime` when Beads context is missing or stale. Codex 0.129.0+ can load Beads context automatically through native hooks; use `/hooks` to inspect or toggle them.
-- Keep persistent project memory in Beads via `bd remember`; do not create ad hoc memory files.
-
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md for details and anti-patterns.
-<!-- END BEADS CODEX SETUP -->
 
 ## Agent skills
 
