@@ -35,18 +35,22 @@ class DocumentError(ValueError):
     """Base class for failures while reading a draft document.
 
     Each subclass declares the HTTP contract the API answers with, so a new
-    failure cannot exist without one. ``public_message`` never echoes the document.
+    failure cannot exist without one, and two failures cannot share a ``code``.
+    ``public_message`` never echoes the document.
     """
 
-    http_status: int
-    code: str
-    public_message: str
+    http_status = 422
+    code = "invalid_document"
+    public_message = "O documento enviado nao pode ser lido."
 
     def __init_subclass__(cls, **kwargs: object) -> None:
         super().__init_subclass__(**kwargs)
-        missing = [a for a in ("http_status", "code", "public_message") if a not in cls.__dict__]
+        missing = [a for a in ("http_status", "code", "public_message") if not cls.__dict__.get(a)]
         if missing:
             raise TypeError(f"{cls.__name__} must declare {', '.join(missing)} (its HTTP contract in the API)")
+        taken = {c.code: name for name, c in DOCUMENT_ERRORS.items() if name != cls.__name__}
+        if cls.code in taken or cls.__name__ in DOCUMENT_ERRORS:
+            raise TypeError(f"{cls.__name__}: code {cls.code!r} or name already used by {taken.get(cls.code, cls.__name__)}")
         DOCUMENT_ERRORS[cls.__name__] = cls
 
 
