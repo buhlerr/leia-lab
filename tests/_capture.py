@@ -1,4 +1,8 @@
-"""Servidor HTTP local que faz o papel da LangSmith e da MLflow (fixture ``capture``)."""
+"""Servidor HTTP local que faz o papel da LangSmith e da MLflow (fixture ``capture``).
+
+Responde o que o SDK usa: ingestao da LangSmith, criacao de traco e BUSCA de traco do MLflow
+(``find_trace`` filtra por tag; so o formato ``tags.`chave` = 'valor'`` e emulado).
+"""
 
 from __future__ import annotations
 
@@ -29,6 +33,7 @@ class CaptureServer:
         self.bodies: list[bytes] = []
         self.mlflow_bodies: list[bytes] = []
         self.mlflow_spans: list[dict[str, Any]] = []
+        self.mlflow_trace_infos: list[dict[str, Any]] = []
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -39,6 +44,7 @@ class CaptureServer:
                     body = gzip.decompress(body)
                 parsed = urlsplit(self.path)
                 path = parsed.path
+                query = parsed.query
 
                 ctype = "application/json"
                 payload = b"{}"
@@ -47,7 +53,7 @@ class CaptureServer:
                     ctype = "text/plain"
                     payload = b"3.18.0"
                 elif path == "/api/2.0/mlflow/experiments/get-by-name":
-                    exp_name = parse_qs(parsed.query).get("experiment_name", ["leia-lab"])[0]
+                    exp_name = parse_qs(query).get("experiment_name", ["leia-lab"])[0]
                     payload = json.dumps(
                         {
                             "experiment": {
@@ -63,7 +69,19 @@ class CaptureServer:
                     req = json.loads(body)
                     ti = req["trace"]["trace_info"]
                     ti.setdefault("tags", {})["mlflow.trace.spansLocation"] = "TRACKING_STORE"
+                    outer.mlflow_trace_infos.append(ti)
                     payload = json.dumps({"trace": {"trace_info": ti}}).encode()
+                elif path == "/api/3.0/mlflow/traces/search" and self.command == "POST":
+                    # Busca do MLflow (find_trace): emula so o filtro por tag `tags.`chave` = 'valor'`.
+                    want_key, want_val = None, None
+                    f = json.loads(body).get("filter", "")
+                    if match := re.search(r"tags\.`([^`]+)` = '([^']*)'", f):
+                        want_key, want_val = match.groups()
+                    hits = [
+                        t for t in outer.mlflow_trace_infos
+                        if want_key is None or t.get("tags", {}).get(want_key) == want_val
+                    ]
+                    payload = json.dumps({"traces": hits, "nextPageToken": ""}).encode()
                 elif path == "/v1/traces" and self.command == "POST":
                     otlp = ExportTraceServiceRequest()
                     otlp.ParseFromString(body)

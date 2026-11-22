@@ -43,6 +43,7 @@ from src.graphs.minuta_rules import (
 from src.ingest.masking import mask_personal_data, resolve_doc_alias
 from src.rag.embeddings import EmbeddingResult, embed_text
 from src.rag.hybrid_search import hybrid_search_rrf
+from src.tracing import tag_analysis
 
 _EMPTY_TEXT_MSG = "text must be a non-empty string"
 _UNMASKED_MSG = "graph input needs masked 'text'; use analyze()/prepare_input() (raw text never enters the graph)"
@@ -224,6 +225,7 @@ def build_analyze_minuta_graph(
         # Falha alto aqui (RulesConfigError), antes de qualquer chamada externa, se faltar regra.
         snap = await load_rules_snapshot(pool)
         aid = await start_analysis(pool, snap, filename_alias=alias, masked_text=text, params=params)
+        tag_analysis(str(aid))  # amarra o traco (LangSmith/MLflow) a esta analise; no-op sem rastreio
         meta = {
             "hash": snap.hash,
             "matrix_version": snap.matrix_version,
