@@ -45,7 +45,7 @@ async def _extract_text(filename: str, data: bytes) -> str:
         raise DocumentTooLargeError("The file is larger than the upload limit")
     extension = os.path.splitext(filename)[1].lower()
     if extension in _ISOLATED_EXTENSIONS:
-        return await asyncio.to_thread(extract_text_isolated, filename, data)
+        return await asyncio.to_thread(extract_text_isolated, extension, data)
     if extension == ".txt":
         try:
             return data.decode("utf-8")

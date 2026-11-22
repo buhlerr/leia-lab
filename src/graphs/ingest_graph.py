@@ -42,7 +42,7 @@ class IngestState(TypedDict, total=False):
 
 def _read_path(path: Path) -> str:
     if path.suffix.lower() in {".pdf", ".docx"}:
-        return extract_text_isolated(path.name, path.read_bytes())
+        return extract_text_isolated(path.suffix, path.read_bytes())
     return path.read_text(encoding="utf-8")
 
 

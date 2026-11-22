@@ -28,24 +28,66 @@ MAX_PDF_PAGES = 500
 MAX_PDF_STREAM_BYTES = 8_000_000
 
 
+DOCUMENT_ERRORS: dict[str, type[DocumentError]] = {}
+
+
 class DocumentError(ValueError):
-    """Base class for failures while reading a draft document."""
+    """Base class for failures while reading a draft document.
+
+    Each subclass declares the HTTP contract the API answers with, so a new
+    failure cannot exist without one. ``public_message`` never echoes the document.
+    """
+
+    http_status: int
+    code: str
+    public_message: str
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+        missing = [a for a in ("http_status", "code", "public_message") if a not in cls.__dict__]
+        if missing:
+            raise TypeError(f"{cls.__name__} must declare {', '.join(missing)} (its HTTP contract in the API)")
+        DOCUMENT_ERRORS[cls.__name__] = cls
 
 
 class UnsupportedFileError(DocumentError):
     """Raised when ``filename`` has an extension this module cannot read."""
 
+    http_status = 415
+    code = "unsupported_file"
+    public_message = "Formato de arquivo nao suportado; envie .pdf, .docx ou .txt."
+
 
 class InvalidDocumentError(DocumentError):
     """Raised when the file is corrupted or cannot be read by its library."""
+
+    http_status = 422
+    code = "invalid_document"
+    public_message = "O documento enviado nao pode ser lido."
 
 
 class EmptyDocumentError(DocumentError):
     """Raised when the document yields no text (for example a scanned PDF)."""
 
+    http_status = 422
+    code = "empty_document"
+    public_message = "O documento enviado nao contem texto extraivel."
+
 
 class DocumentTooLargeError(DocumentError):
     """Raised when reading the file would exceed the size limits."""
+
+    http_status = 413
+    code = "document_too_large"
+    public_message = "O arquivo excede o limite de tamanho permitido."
+
+
+class DocumentTimeoutError(DocumentError):
+    """Raised when the isolated reader does not finish within its time limit."""
+
+    http_status = 422
+    code = "document_timeout"
+    public_message = "O documento demorou demais para ser lido."
 
 
 def _extract_pdf(data: bytes) -> str:
@@ -99,13 +141,17 @@ def _extract_docx(data: bytes) -> str:
 
 
 def extract_text(filename: str, data: bytes) -> str:
-    """Extract plain text from ``data`` according to ``filename``'s extension.
+    """Extract plain text from ``data`` according to ``filename``'s extension."""
+    return extract_by_extension(os.path.splitext(filename)[1], data)
 
-    Supports ``.pdf`` and ``.docx``. The result is stripped; an empty result
-    raises :class:`EmptyDocumentError`. Error messages never include document
-    contents.
+
+def extract_by_extension(extension: str, data: bytes) -> str:
+    """Extract plain text from ``data`` read as ``extension`` (``.pdf`` or ``.docx``).
+
+    The result is stripped; an empty result raises :class:`EmptyDocumentError`.
+    Error messages never include document contents.
     """
-    extension = os.path.splitext(filename)[1].lower()
+    extension = extension.lower()
 
     if extension == ".pdf":
         extractor = _extract_pdf
