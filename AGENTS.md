@@ -13,6 +13,23 @@ leia-lab analyses Brazilian residential lease contracts ("minutas"). A file is r
 - `data/`: versioned base normativa and risk matrix. `gold/`: gold set. `deploy/`: production image, backup and firewall.
 - Git-ignored, local only, never commit or upload: `leia-minutas-teste-mascaradas/` (test minutas, `LEIA_MINUTAS_DIR`), `leia-kb-legislacao/` (a separate repo with raw legislation sources), `.local/` (CLI runs and verification evidence), `.planning/`.
 
+## Where things run
+
+Production lives in the homelab, container CT 116. Look there, not in a local checkout. Details and the commands for each piece: `docs/OPERACAO.md`.
+
+| Thing | Where | How to reach it |
+|---|---|---|
+| Admin (risk matrix, "Nova análise", each analysis with its report and trail) | https://admin.rauvbr.com | Pangolin SSO, then Django login |
+| API | https://leia-api.rauvbr.com (`/docs`) | Bearer `LEIA_API_TOKEN`, kept in `/root/leia/api.env` on CT 116. `GET /v1/analyses/{id}` returns the report and trail. The API has no route that lists analyses |
+| MLflow (API traces, tagged `leia.analysis_id`) | https://mlflow.rauvbr.com, internal `http://leia-mlflow:5000` | Pangolin SSO, or the "trace" link on the analysis page |
+| LangSmith (CLI traces, only with `--trace`) | Project `leia-lab` | Owner's account |
+| Production Postgres (`leia_lab`, shared with Directus): `analyses`, `analysis_trail`, matrix | CT 116, `192.168.0.120:5432` | Only from the home LAN, through Proxmox `pve` (`192.168.0.9`, `pct exec 116`) |
+| Daily `pg_dump` backups | `/var/backups/leia/` on `pve` | Home LAN |
+| Secrets | Shelve, team `vitor`, project `LEIA` | `shelve run --env production -- <cmd>` on the Windows machine |
+| Test minutas and gold-set texts (`leia-minutas-teste-mascaradas/`) | Windows checkout only (`C:\Users\Vitor\dev\leia-lab`) | Never committed or uploaded |
+
+The VPS checkout (`/data/projects/leia-lab`, host `acfs`) is outside the home LAN. From it, SSH to `pve` times out, Shelve is not installed, and the minutas are absent. Its Postgres on `localhost:5433` holds only test and `leia_lab_verify_*` databases, never production data. To read a production analysis from the VPS, ask the user for the admin page export (the analysis id is in its URL) or for the API token and the id.
+
 ## Build and test
 
 Windows, Python 3.12+ in `.venv` managed by uv. Run commands from the repo root in Git Bash.
