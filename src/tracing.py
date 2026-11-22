@@ -104,7 +104,7 @@ def tag_span(**metadata: Any) -> None:
 
 
 def tag_analysis(analysis_id: str) -> None:
-    """Amerra o traco atual a analise: metadata no run da LangSmith, tag ``ANALYSIS_TAG`` no MLflow.
+    """Amarra o traco atual a analise: metadata no run da LangSmith, tag ``ANALYSIS_TAG`` no MLflow.
 
     No-op com o rastreio desligado. Chamado no no ``iniciar`` logo depois do id existir, entao
     vale para o CLI (``--trace``) e para a API.
