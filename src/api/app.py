@@ -15,8 +15,10 @@ apelido ``documento-<sha8>.<ext>`` e respostas de erro de codigo fixo.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import hmac
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -39,7 +41,9 @@ from src.ingest.extract import (
     InvalidDocumentError,
     UnsupportedFileError,
 )
-from src.tracing import configure_mlflow, mlflow_request, shutdown_mlflow
+from src.tracing import configure_mlflow, mlflow_request, shutdown_mlflow, use_short_mlflow_http
+
+_log = logging.getLogger(__name__)
 
 # Erros do nucleo -> (HTTP, codigo fixo, mensagem generica), numa tabela so.
 # O corpo de erro nunca ecoa conteudo do documento nem o nome real do arquivo.
@@ -64,6 +68,21 @@ def _require_token_factory(expected: str) -> Any:
     return require_token
 
 
+async def _start_mlflow(cfg: Settings) -> bool:
+    """Liga o MLflow do processo; se ele nao responder, a API sobe sem rastreio.
+
+    O rastreio e vista de depuracao, nao a auditoria (que fica no Postgres): o MLflow fora do ar
+    nunca impede a API de subir.
+    """
+    use_short_mlflow_http()
+    try:
+        await asyncio.to_thread(configure_mlflow, cfg.MLFLOW_TRACKING_URI, cfg.MLFLOW_EXPERIMENT_NAME)
+    except Exception:
+        _log.warning("MLflow indisponivel na subida; a API segue sem rastreio ate reiniciar")
+        return False
+    return True
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Monta a API. Recusa subir sem ``LEIA_API_TOKEN`` (fail closed)."""
     cfg = settings or Settings()
@@ -76,13 +95,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.pool = pool
         # O grafo fecha sobre o pool: regras e trilha passam por ele.
         app.state.graph = build_analyze_minuta_graph(pool, cfg)
-        mlflow_on = bool(cfg.MLFLOW_TRACKING_URI)
-        if mlflow_on:  # LangSmith fica fora da API: so o MLflow self-hosted
-            configure_mlflow(cfg.MLFLOW_TRACKING_URI, cfg.MLFLOW_EXPERIMENT_NAME)
+        app.state.mlflow_on = False
         try:
+            if cfg.MLFLOW_TRACKING_URI:  # LangSmith fica fora da API: so o MLflow self-hosted
+                app.state.mlflow_on = await _start_mlflow(cfg)
             yield
         finally:
-            if mlflow_on:
+            if app.state.mlflow_on:
                 shutdown_mlflow()
             await pool.close()
 
@@ -112,9 +131,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> AnalysisResult:
         # Le no maximo um byte alem do teto: o nucleo recusa sem carregar o resto.
         data = await file.read(MAX_UPLOAD_BYTES + 1)
-        # Traco MLflow so quando configurado, e descarregado antes de a resposta voltar
-        # (mlflow_request sai do bloco aqui). O nucleo (service.py) segue sem rastreio.
-        with mlflow_request() if cfg.MLFLOW_TRACKING_URI else contextlib.nullcontext():
+        # Traco MLflow so quando ele subiu junto; o nucleo (service.py) segue sem rastreio.
+        with mlflow_request() if app.state.mlflow_on else contextlib.nullcontext():
             return await evaluate_upload(
                 app.state.pool, app.state.graph, filename=file.filename or "", data=data
             )

@@ -58,6 +58,7 @@ def api_settings() -> Settings:
         OPENROUTER_API_KEY="",
         TYPESAFE_API_KEY="",
         LEIA_API_TOKEN=TOKEN,
+        MLFLOW_TRACKING_URI="",  # nunca herdar o MLflow real do ambiente de quem roda a suite
     )
 
 
@@ -263,3 +264,17 @@ async def test_post_sem_mlflow_configurado_nao_envia_nada(pool, api_settings, ca
         )
         assert r.status_code == 201, r.text
     assert capture.mlflow_bodies == []
+
+
+async def test_api_sobe_e_analisa_com_o_mlflow_fora_do_ar(pool, api_settings) -> None:
+    """O rastreio e opcional: MLflow inacessivel na subida nao derruba nem trava a API."""
+    await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
+    down = api_settings.model_copy(update={"MLFLOW_TRACKING_URI": "http://127.0.0.1:9"})
+
+    async with api_client(down) as client:
+        r = await client.post(
+            "/v1/analyses",
+            files={"file": ("mlflow-fora.txt", _MINUTA.encode("utf-8"), "text/plain")},
+            headers=_auth(),
+        )
+        assert r.status_code == 201, r.text

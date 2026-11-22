@@ -51,7 +51,7 @@ Endereço, Pangolin e como atualizar: `docs/OPERACAO.md`.
 A página **Nova análise** (changelist de análises, grupo `editor` ou superusuário) envia a minuta
 pelo servidor à API (`POST /v1/analyses`). Quem grava a análise é a API com o token de serviço;
 o login do admin não escreve em `analyses`. O upload espera a resposta em até 300 s, por isso o
-gunicorn roda com `--timeout 300`.
+gunicorn roda com `--timeout 330` (folga para a página responder com erro).
 
 Variáveis novas no `django.env`:
 

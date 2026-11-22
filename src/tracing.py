@@ -185,15 +185,15 @@ def mlflow_tracing(tracking_uri: str | None = None, experiment_name: str | None 
 def mlflow_request() -> Iterator[None]:
     """Uma requisicao num servidor ja configurado por ``configure_mlflow``.
 
-    Ativa o rastreio so dentro do bloco (os spans dos clientes olham ``_MLFLOW_ACTIVE``) e, ao
-    sair, descarrega a fila do MLflow: o traco chega ao servidor antes da resposta HTTP voltar.
+    Ativa o rastreio so dentro do bloco (os spans dos clientes olham ``_MLFLOW_ACTIVE``). O envio
+    fica com o exportador em segundo plano do MLflow: descarregar a fila aqui travaria o event loop
+    da API inteira enquanto o MLflow estivesse lento ou fora do ar.
     """
     token = _MLFLOW_ACTIVE.set(True)
     try:
         yield
     finally:
         _MLFLOW_ACTIVE.reset(token)
-        mlflow.flush_trace_async_logging()
 
 
 @dataclass(frozen=True)
@@ -205,8 +205,8 @@ class TraceRef:
     duration_ms: int | None
 
 
-# Chamadas de consulta ao MLflow curtas: timeout de 5 s e sem reflexo de retentativa longa.
-# So entram se o operador nao as definiu; sao restauradas no fim da busca.
+# O padrao do MLflow e 120 s por chamada com 7 retentativas: minutos de espera se o servidor
+# cair. Servidores de vida longa (API, admin) usam chamadas curtas; o operador ainda manda.
 _SHORT_MLFLOW_HTTP_ENV = {
     "MLFLOW_HTTP_REQUEST_TIMEOUT": "5",
     "MLFLOW_HTTP_REQUEST_MAX_RETRIES": "1",
@@ -214,18 +214,10 @@ _SHORT_MLFLOW_HTTP_ENV = {
 }
 
 
-@contextmanager
-def _short_mlflow_http() -> Iterator[None]:
-    saved = {k: os.environ.get(k) for k in _SHORT_MLFLOW_HTTP_ENV}
-    os.environ.update({k: v for k, v in _SHORT_MLFLOW_HTTP_ENV.items() if saved[k] is None})
-    try:
-        yield
-    finally:
-        for key, prev in saved.items():
-            if prev is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = prev
+def use_short_mlflow_http() -> None:
+    """Chamadas curtas ao MLflow no processo inteiro, sem sobrescrever o que o operador definiu."""
+    for key, value in _SHORT_MLFLOW_HTTP_ENV.items():
+        os.environ.setdefault(key, value)
 
 
 @lru_cache(maxsize=4)
@@ -242,28 +234,28 @@ def find_trace(tracking_uri: str, experiment_name: str, analysis_id: uuid.UUID) 
     """
     if not tracking_uri:
         return None
-    with _short_mlflow_http():
-        try:
-            client = _trace_client(tracking_uri)
-            experiment = client.store.get_experiment_by_name(experiment_name)
-            if experiment is None:
-                return None
-            found = client.search_traces(
-                experiment_ids=[experiment.experiment_id],
-                filter_string=f"tags.`{ANALYSIS_TAG}` = '{analysis_id}'",
-                max_results=1,
-                include_spans=False,
-            )
-        except Exception:
+    use_short_mlflow_http()
+    try:
+        client = _trace_client(tracking_uri)
+        experiment = client.store.get_experiment_by_name(experiment_name)
+        if experiment is None:
             return None
-    if not found:
+        found = client.search_traces(
+            experiment_ids=[experiment.experiment_id],
+            filter_string=f"tags.`{ANALYSIS_TAG}` = '{analysis_id}'",
+            max_results=1,
+            include_spans=False,
+        )
+        if not found:
+            return None
+        info = found[0].info
+        return TraceRef(
+            experiment_id=experiment.experiment_id,
+            trace_id=info.trace_id,
+            duration_ms=info.execution_duration,
+        )
+    except Exception:
         return None
-    info = found[0].info
-    return TraceRef(
-        experiment_id=experiment.experiment_id,
-        trace_id=info.trace_id,
-        duration_ms=info.execution_duration,
-    )
 
 
 @contextmanager

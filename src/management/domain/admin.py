@@ -27,6 +27,7 @@ from django.urls import path
 from django.utils import timezone
 from django.utils.html import format_html
 
+from src.ingest.extract import MAX_UPLOAD_BYTES
 from src.management.domain.models import (
     Analysis,
     AnalysisTrail,
@@ -149,7 +150,7 @@ class TrailInline(admin.TabularInline):
 # ---------------------------------------------------------------- nova analise (pela API)
 
 ANALISE_SUFFIXES = (".pdf", ".docx", ".txt")
-API_TIMEOUT_S = 300  # a API roda a analise inteira de forma sincrona
+API_TIMEOUT_S = 300  # a API roda a analise inteira de forma sincrona; o gunicorn espera 330 s
 
 
 class NovaAnaliseForm(forms.Form):
@@ -159,6 +160,8 @@ class NovaAnaliseForm(forms.Form):
         f = self.cleaned_data["file"]
         if Path(f.name).suffix.lower() not in ANALISE_SUFFIXES:
             raise forms.ValidationError("Use .pdf, .docx ou .txt.")
+        if f.size > MAX_UPLOAD_BYTES:  # o mesmo teto da API, antes de ler o arquivo na memoria
+            raise forms.ValidationError("O arquivo excede o limite de tamanho permitido.")
         return f
 
 
@@ -179,8 +182,8 @@ def post_analysis(filename: str, data: bytes) -> tuple[int, dict]:
         try:
             body = response.json()
         except ValueError:
-            body = {}
-        return response.status_code, body
+            body = None
+        return response.status_code, body if isinstance(body, dict) else {}
 
 
 def _duracao_humana(seconds: float) -> str:
