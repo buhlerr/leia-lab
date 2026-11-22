@@ -13,14 +13,25 @@ def _git(*args: str, cwd: Path = REPO) -> list[str]:
     return out.splitlines()
 
 
-def tracked_but_ignored(cwd: Path = REPO, gitignore: Path = REPO / ".gitignore") -> list[str]:
-    return _git("ls-files", "--cached", "--ignored", f"--exclude-from={gitignore}", cwd=cwd)
+def tracked_but_ignored(cwd: Path = REPO, root_rules: Path | None = None) -> list[str]:
+    """Versionados que algum .gitignore do repo exclui (o da raiz e os aninhados, ex.: .beads/.gitignore).
+
+    ``root_rules`` aplica as regras de hoje a uma arvore antiga, para reproduzir um commit passado.
+    """
+    extra = [f"--exclude-from={root_rules}"] if root_rules else []
+    return _git("ls-files", "--cached", "--ignored", "--exclude-per-directory=.gitignore", *extra, cwd=cwd)
 
 
 def orphan_gitlinks(cwd: Path = REPO) -> list[str]:
-    if (cwd / ".gitmodules").exists():
-        return []
-    return [line.split("\t", 1)[1] for line in _git("ls-files", "--stage", cwd=cwd) if line.startswith("160000 ")]
+    declared: set[str] = set()
+    if _git("ls-files", ".gitmodules", cwd=cwd):
+        out = subprocess.run(
+            ["git", "config", "--file", ".gitmodules", "--get-regexp", r"\.path$"],
+            cwd=cwd, capture_output=True, text=True, check=False,
+        ).stdout
+        declared = {line.split(" ", 1)[1] for line in out.splitlines()}
+    links = [line.split("\t", 1)[1] for line in _git("ls-files", "--stage", cwd=cwd) if line.startswith("160000 ")]
+    return [path for path in links if path not in declared]
 
 
 def test_no_tracked_file_matches_gitignore():
