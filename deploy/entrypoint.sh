@@ -14,4 +14,5 @@ if [ -n "${DJANGO_SUPERUSER_USERNAME:-}" ]; then
     || echo "superusuario $DJANGO_SUPERUSER_USERNAME ja existe"
 fi
 
-exec gunicorn src.management.leia_admin.wsgi:application -b 0.0.0.0:8000 --workers 2 --access-logfile -
+# gunicorn com timeout 300 s: a view de "Nova analise" espera a API rodar a analise inteira.
+exec gunicorn src.management.leia_admin.wsgi:application -b 0.0.0.0:8000 --workers 2 --timeout 300 --access-logfile -

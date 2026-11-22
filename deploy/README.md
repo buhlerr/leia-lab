@@ -35,6 +35,31 @@ O `migrate` só cria as tabelas do Django e os grupos `editor` (edita regras e b
 `leitor` (só vê). Ninguém, nem o superusuário, escreve em histórico, análises ou trilha: o admin
 nega, e o banco também nega por grant e por gatilho.
 
+## Análise pela tela
+
+A página **Nova análise** (changelist de análises, grupo `editor` ou superusuário) envia a minuta
+pelo servidor à API (`POST /v1/analyses`). Quem grava a análise é a API com o token de serviço;
+o login do admin não escreve em `analyses`. O upload espera a resposta em até 300 s, por isso o
+gunicorn roda com `--timeout 300`.
+
+Variáveis novas no `django.env`:
+
+```bash
+-e LEIA_API_URL='http://leia-api:8080' \
+-e LEIA_API_TOKEN='<token de servico da API>' \
+-e LEIA_MLFLOW_URL='http://leia-mlflow:5000'   # vazio: o detalhe mostra "sem trace"
+```
+
+Variável nova no `api.env` da API:
+
+```bash
+-e MLFLOW_TRACKING_URI='http://leia-mlflow:5000'   # vazio: a API nao rastreia nada
+```
+
+Com isso cada análise da API grava um trace no MLflow marcado com o `leia.analysis_id`, e o
+detalhe da análise no admin linka o trace. O trace da API vai só para o MLflow self-hosted, com
+conteúdo mascarado, a mesma política do `--trace` do CLI. A LangSmith fica fora da API.
+
 ## Testes
 
 ```bash
