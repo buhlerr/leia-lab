@@ -273,8 +273,9 @@ class AnalysisAdmin(_ReadOnlyAdmin):
         from src.tracing import find_trace
 
         ref = find_trace(settings.LEIA_MLFLOW_URL, settings.MLFLOW_EXPERIMENT_NAME, obj.id)
-        if ref is None:  # MLflow fora do ar, sem trace ainda ou filtro sem resposta
-            return "sem trace"
+        if ref is None:  # MLflow fora do ar, trace ainda no lote de envio ou filtro sem resposta
+            recente = obj.finished_at and (timezone.now() - obj.finished_at).total_seconds() < 60
+            return "trace sendo gravado: recarregue em alguns segundos" if recente else "sem trace"
         url = (
             f"{settings.LEIA_MLFLOW_PUBLIC_URL}/#/experiments/{ref.experiment_id}"
             f"/traces?selectedEvaluationId={ref.trace_id}"
