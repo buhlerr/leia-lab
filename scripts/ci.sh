@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Every check the repo has, in one command. DSR runs it from its registry:
 #   required_checks: ["scripts/ci.sh"]
-# Needs a disposable Postgres with pgvector in TEST_DATABASE_URL (or in .env); the name must end in _test.
+# Needs a disposable Postgres with pgvector in TEST_DATABASE_URL (or in .env); the name must end in _test,
+# and java 11+ (on PATH or JAVA_HOME) for the TLA+ model of the analysis lifecycle.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -28,6 +29,7 @@ django_tests() { DATABASE_URL="$TEST_DATABASE_URL" DJANGO_DEBUG="false" py -m sr
 
 step pytest py -m pytest -q -p no:cacheprovider
 step django django_tests
+step analysis-lifecycle bash .claude/skills/verify-analysis-lifecycle/scripts/check.sh
 
 if ((${#failed[@]})); then
     echo "ci.sh: failed: ${failed[*]}"
