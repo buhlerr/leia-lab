@@ -15,6 +15,7 @@ apelido ``documento-<sha8>.<ext>`` e respostas de erro de codigo fixo.
 
 from __future__ import annotations
 
+import contextlib
 import hmac
 import uuid
 from collections.abc import AsyncIterator
@@ -38,6 +39,7 @@ from src.ingest.extract import (
     InvalidDocumentError,
     UnsupportedFileError,
 )
+from src.tracing import configure_mlflow, mlflow_request, shutdown_mlflow
 
 # Erros do nucleo -> (HTTP, codigo fixo, mensagem generica), numa tabela so.
 # O corpo de erro nunca ecoa conteudo do documento nem o nome real do arquivo.
@@ -74,9 +76,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.pool = pool
         # O grafo fecha sobre o pool: regras e trilha passam por ele.
         app.state.graph = build_analyze_minuta_graph(pool, cfg)
+        mlflow_on = bool(cfg.MLFLOW_TRACKING_URI)
+        if mlflow_on:  # LangSmith fica fora da API: so o MLflow self-hosted
+            configure_mlflow(cfg.MLFLOW_TRACKING_URI, cfg.MLFLOW_EXPERIMENT_NAME)
         try:
             yield
         finally:
+            if mlflow_on:
+                shutdown_mlflow()
             await pool.close()
 
     app = FastAPI(title="leia-lab API", version="1", lifespan=lifespan)
@@ -105,9 +112,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> AnalysisResult:
         # Le no maximo um byte alem do teto: o nucleo recusa sem carregar o resto.
         data = await file.read(MAX_UPLOAD_BYTES + 1)
-        return await evaluate_upload(
-            app.state.pool, app.state.graph, filename=file.filename or "", data=data
-        )
+        # Traco MLflow so quando configurado, e descarregado antes de a resposta voltar
+        # (mlflow_request sai do bloco aqui). O nucleo (service.py) segue sem rastreio.
+        with mlflow_request() if cfg.MLFLOW_TRACKING_URI else contextlib.nullcontext():
+            return await evaluate_upload(
+                app.state.pool, app.state.graph, filename=file.filename or "", data=data
+            )
 
     @app.get(
         "/v1/analyses/{analysis_id}",

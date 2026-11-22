@@ -44,6 +44,9 @@ _MLFLOW_ACTIVE: ContextVar[bool] = ContextVar("_mlflow_active", default=False)
 # ``analyses``. Chave com ponto exige crases no filtro de busca do MLflow.
 ANALYSIS_TAG = "leia.analysis_id"
 
+# Tracking uri que o processo tinha antes de ``configure_mlflow`` (None = nao tinha).
+_MLFLOW_PREV_URI: str | None = None
+
 
 def client_span(name: str, allowed: tuple[str, ...]) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Span ``llm`` nos backends ativos (LangSmith / MLflow) registrando so ``allowed``."""
@@ -132,8 +135,12 @@ def configure_mlflow(tracking_uri: str, experiment_name: str) -> None:
     """Configura o MLflow do PROCESSO: uri, tracing, experimento e autolog do LangChain.
 
     Uma vez na subida de um servidor de vida longa (lifespan da API). Para o bloco curto do CLI
-    use ``mlflow_tracing``, que desfaz tudo ao sair.
+    use ``mlflow_tracing``, que desfaz tudo ao sair. ``shutdown_mlflow`` desfaz o que esta
+    funcao fez: sem ela, o ``set_tracking_uri`` abaixo grava a variavel de ambiente
+    ``MLFLOW_TRACKING_URI`` (heranca para subprocessos) e ela vaza para o resto do processo.
     """
+    global _MLFLOW_PREV_URI
+    _MLFLOW_PREV_URI = os.environ.get("MLFLOW_TRACKING_URI")
     mlflow.set_tracking_uri(tracking_uri)
     mlflow.tracing.enable()
     mlflow.set_experiment(experiment_name)
@@ -141,9 +148,14 @@ def configure_mlflow(tracking_uri: str, experiment_name: str) -> None:
 
 
 def shutdown_mlflow() -> None:
-    """Desfaz o ``configure_mlflow`` na descida do servidor: desliga o autolog e descarrega o resto."""
+    """Desfaz o ``configure_mlflow`` na descida do servidor.
+
+    Desliga o autolog, descarrega o que falta na fila e devolve o tracking uri que o processo
+    tinha antes (``None`` desconfigura e apaga a variavel de ambiente).
+    """
     mlflow.langchain.autolog(disable=True, silent=True)
     mlflow.flush_trace_async_logging()
+    mlflow.set_tracking_uri(_MLFLOW_PREV_URI)
 
 
 @contextmanager

@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     # Token de servico da API (src/api): bearer exigido em /v1/analyses. A API
     # recusa subir sem ele. Nao tem relacao com os logins do Django Admin.
     LEIA_API_TOKEN: str = ""
+    # Rastreio da API: so o MLflow self-hosted (vazio = a API nao rastreia nada). A LangSmith
+    # fica fora da API; o conteudo enviado e o mesmo do CLI --trace, sempre mascarado.
+    MLFLOW_TRACKING_URI: str = ""
+    MLFLOW_EXPERIMENT_NAME: str = "leia-lab"
 
     model_config = SettingsConfigDict(
         env_file=".env",
