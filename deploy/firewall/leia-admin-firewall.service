@@ -1,5 +1,5 @@
 [Unit]
-Description=Porta 8000 do admin da Leia so para os conectores Newt
+Description=Portas 8000 (admin) e 8080 (API) da Leia so para os conectores Newt
 After=docker.service
 Requires=docker.service
 

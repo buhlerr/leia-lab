@@ -25,6 +25,29 @@ A chave fica no **Shelve** (time `vitor`, projeto `LEIA`), ver "Segredos" abaixo
 Se um Newt mudar de máquina, atualize os IPs em `/usr/local/sbin/leia-admin-firewall.sh` no CT 116 e
 rode `systemctl restart leia-admin-firewall`.
 
+## API para a camada FE: https://leia-api.rauvbr.com
+
+| Peça | Estado (2026-11-21) |
+|---|---|
+| Endereço | **https://leia-api.rauvbr.com** (recurso Pangolin id 57, org `vitor`), SSL, **sem SSO**: a barreira é o bearer `LEIA_API_TOKEN` (o FE chama do servidor dele) |
+| Caminho | Pangolin → site Newt `proxmox` → `192.168.0.120:8080` (CT 116) |
+| Serviço | `api` no `/root/leia/docker-compose.yml` (container `leia-api`, imagem `leia-api:<sha>`, build de `/root/leia/api`, separado do `management/` do admin), `entrypoint: python -m src.api`, healthcheck em `/healthz` |
+| Segredos | `/root/leia/api.env` (chmod 600): `DATABASE_URL` do login `api_login` (membro de `leia_app`, não dono) e `LEIA_API_TOKEN` (64 hex). Gerados no próprio CT, nunca impressos |
+| Porta 8080 na LAN | **fechada**: mesma cadeia `LEIA-ADMIN` da 8000 (`deploy/firewall/`) |
+| Modelos | OpenRouter e TypeSafe em modo offline até as chaves entrarem (`leia-lab-8tr.9`); quando entrarem, vão no `api.env` |
+
+Passar o token ao FE: `ssh root@192.168.0.9 pct exec 116 -- grep LEIA_API_TOKEN /root/leia/api.env`. Para
+trocar o token, edite o `api.env` e rode `docker compose up -d --no-deps api`.
+
+Atualizar a API para um commit novo (o admin não é tocado):
+
+```bash
+git archive --format=tar.gz -o leia-api-<sha>.tar.gz <sha> pyproject.toml uv.lock src deploy .dockerignore
+# no CT 116, em /root/leia: mv api api.bak-<data>; mkdir api; tar -xzf leia-api-<sha>.tar.gz -C api
+# troque a tag em image: leia-api:<sha> no compose, então:
+docker compose build api && docker compose up -d --no-deps api
+```
+
 ## Segredos (Shelve)
 
 `shelve.json` na raiz aponta para o time `vitor`, projeto `LEIA` (padrão `development`; `production`
