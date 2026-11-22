@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 
@@ -52,8 +53,8 @@ async def _leaks(pool, settings) -> tuple[dict[str, list[str]], dict]:
     graph = build_analyze_minuta_graph(pool, settings, checkpointer=saver)
     cfg = {"configurable": {"thread_id": "t1"}}
     updates = [c async for c in analyze_stream(graph, raw_text=RAW, filename=FILE_NAME, config=cfg)]
-    final = (await graph.aget_state(cfg)).values
-    checkpoints = [s async for s in graph.aget_state_history(cfg)]
+    final = (await graph.compiled.aget_state(cfg)).values
+    checkpoints = [s async for s in graph.compiled.aget_state_history(cfg)]
     assert len(checkpoints) > 3 and final.get("suportado") is True  # a analise passou por todos os passos
 
     trail = [r["j"] for r in await pool.fetch("SELECT to_jsonb(t)::text AS j FROM analysis_trail t")]
@@ -92,7 +93,14 @@ async def test_the_scan_catches_the_leak_when_masking_is_switched_off(seeded, se
     assert FILE_NAME in leaks["trilha"] and FILE_NAME in leaks["relatorio"]
 
 
-@pytest.mark.parametrize("bad_input", [{"raw_text": RAW, "filename": "x.txt"}, {"text": RAW, "filename": "x.txt"}])
+@pytest.mark.parametrize(
+    "bad_input",
+    [
+        {"raw_text": RAW, "filename": "x.txt"},
+        {"text": RAW, "filename": "x.txt"},
+        {"text": "CONTRATO DE LOCACAO RESIDENCIAL", "filename": "x.txt"},  # mascarado, mas sem analysis_id
+    ],
+)
 async def test_graph_refuses_input_that_did_not_go_through_analyze(seeded, settings, monkeypatch, bad_input):
     async def boom(*a, **k):
         raise AssertionError("nenhuma chamada externa com texto cru")
@@ -100,7 +108,7 @@ async def test_graph_refuses_input_that_did_not_go_through_analyze(seeded, setti
     monkeypatch.setattr(mod, "call_jev", boom)
     graph = build_analyze_minuta_graph(seeded, settings)
     with pytest.raises(ValueError, match="analyze") as exc:
-        await graph.ainvoke(bad_input)
+        await graph.compiled.ainvoke(bad_input)
     assert not _found(str(exc.value))
     assert await seeded.fetchval("SELECT count(*) FROM analyses") == 0
 
@@ -164,7 +172,46 @@ async def test_a_failing_step_marks_the_analysis_failed_with_the_error_type_only
         await analyze(build_analyze_minuta_graph(seeded, settings), raw_text=RAW, filename=FILE_NAME)
     row = await seeded.fetchrow("SELECT id, status, report, finished_at FROM analyses")
     assert row["status"] == "failed" and row["finished_at"] is not None
-    assert json.loads(row["report"]) == {"error": "RuntimeError", "step": "buscar"}
+    assert json.loads(row["report"]) == {"error": "RuntimeError"}
     steps = [r["step"] for r in await seeded.fetch("SELECT step FROM analysis_trail WHERE analysis_id = $1 ORDER BY seq", row["id"])]
     assert steps[-1] == "triar" and "buscar" not in steps  # a trilha mostra ate onde chegou
     assert isinstance(row["id"], uuid.UUID)
+
+
+async def _only_analysis(pool) -> tuple[dict, list[str]]:
+    row = await pool.fetchrow("SELECT id, status, report, finished_at FROM analyses")
+    steps = [r["step"] for r in await pool.fetch("SELECT step FROM analysis_trail WHERE analysis_id = $1 ORDER BY seq", row["id"])]
+    return {**row, "report": json.loads(row["report"]) if row["report"] else None}, steps
+
+
+async def test_a_failure_right_after_the_insert_marks_the_analysis_failed(seeded, settings, monkeypatch):
+    """PR #31: a linha ja existe, mas o estado do grafo ainda nao tem o analysis_id."""
+
+    def explode(analysis_id):
+        raise RuntimeError(f"rastreio caiu com {NAME}")
+
+    monkeypatch.setattr(mod, "tag_analysis", explode)
+    with pytest.raises(RuntimeError):
+        await analyze(build_analyze_minuta_graph(seeded, settings), raw_text=RAW, filename=FILE_NAME)
+    row, steps = await _only_analysis(seeded)
+    assert (row["status"], row["report"], steps) == ("failed", {"error": "RuntimeError"}, ["iniciar"])
+    assert row["finished_at"] is not None
+
+
+async def test_a_cancelled_analysis_ends_failed(seeded, settings, monkeypatch):
+    """Cliente que desconecta ou timeout: o CancelledError nao e Exception e nao pode deixar 'running'."""
+    calling = asyncio.Event()
+
+    async def hang(*a, **k):
+        calling.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(mod, "call_jev", hang)
+    run = asyncio.create_task(analyze(build_analyze_minuta_graph(seeded, settings), raw_text=RAW, filename=FILE_NAME))
+    await calling.wait()
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run
+    row, steps = await _only_analysis(seeded)
+    assert (row["status"], row["report"], steps) == ("failed", {"error": "CancelledError"}, ["iniciar"])
+    assert row["finished_at"] is not None
