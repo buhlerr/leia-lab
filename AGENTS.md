@@ -23,12 +23,14 @@ Production lives in the homelab, container CT 116. Look there, not in a local ch
 | API | https://leia-api.rauvbr.com (`/docs`) | Bearer `LEIA_API_TOKEN`, kept in `/root/leia/api.env` on CT 116. `GET /v1/analyses/{id}` returns the report and trail. The API has no route that lists analyses |
 | MLflow (API traces, tagged `leia.analysis_id`) | https://mlflow.rauvbr.com, internal `http://leia-mlflow:5000` | Pangolin SSO, or the "trace" link on the analysis page |
 | LangSmith (CLI traces, only with `--trace`) | Project `leia-lab` | Owner's account |
-| Production Postgres (`leia_lab`, shared with Directus): `analyses`, `analysis_trail`, matrix | CT 116, `192.168.0.120:5432` | Only from the home LAN, through Proxmox `pve` (`192.168.0.9`, `pct exec 116`) |
-| Daily `pg_dump` backups | `/var/backups/leia/` on `pve` | Home LAN |
-| Secrets | Shelve, team `vitor`, project `LEIA` | `shelve run --env production -- <cmd>` on the Windows machine |
+| Production Postgres (`leia_lab`, shared with Directus): `analyses`, `analysis_trail`, matrix | CT 116, container `leia-lab-postgres`, `192.168.0.120:5432` | Through Proxmox `pve` (`192.168.0.9` on the LAN, `100.101.28.59` on Tailscale): `ssh pve "pct exec 116 -- docker exec leia-lab-postgres psql -U leia -d leia_lab"`. Set `default_transaction_read_only=on` before reading |
+| Daily `pg_dump` backups | `/var/backups/leia/` on `pve` | `ssh pve` |
+| Secrets | Shelve, team `vitor`, project `LEIA`. `production` holds the paid OpenRouter and TypeSafe keys; no environment holds `DATABASE_URL` or `LEIA_API_TOKEN` | `shelve run --env <env> -- <cmd>`, on Windows and on the VPS |
 | Test minutas and gold-set texts (`leia-minutas-teste-mascaradas/`) | Windows checkout only (`C:\Users\Vitor\dev\leia-lab`) | Never committed or uploaded |
 
-The VPS checkout (`/data/projects/leia-lab`, host `acfs`) is outside the home LAN. From it, SSH to `pve` times out, Shelve is not installed, and the minutas are absent. Its Postgres on `localhost:5433` holds only test and `leia_lab_verify_*` databases, never production data. To read a production analysis from the VPS, ask the user for the admin page export (the analysis id is in its URL) or for the API token and the id.
+**Windows** (`C:\Users\Vitor\dev\leia-lab`) is on the home LAN and holds the minutas. Run commands in Git Bash.
+
+**VPS** (`/data/projects/leia-lab`, host `acfs`) reaches the homelab only through Tailscale: `ssh pve` is the `~/.ssh/config` alias (key `~/.ssh/leia_pve`), then `pct exec 116`. The LAN routes `192.168.0.9/32` and `192.168.0.120/32` are advertised by `pve`, but direct LAN IPs work only once they are approved in the Tailscale admin, so use the `ssh pve` path. Shelve is logged in (`~/.config/.shelve`, mode 600). The minutas are absent; ask the user for them. The VPS Postgres on `localhost:5433` holds only test and `leia_lab_verify_*` databases, never production data.
 
 ## Build and test
 
