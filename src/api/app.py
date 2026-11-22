@@ -19,6 +19,7 @@ import asyncio
 import contextlib
 import hmac
 import logging
+import os
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -75,6 +76,9 @@ async def _start_mlflow(cfg: Settings) -> bool:
     nunca impede a API de subir.
     """
     use_short_mlflow_http()
+    # O trace so fica buscavel quando o span raiz sai do lote; o padrao espera ate 5 s e o admin,
+    # que abre o detalhe logo depois do POST, mostraria "sem trace".
+    os.environ.setdefault("MLFLOW_ASYNC_TRACE_LOGGING_MAX_INTERVAL_MILLIS", "500")
     try:
         await asyncio.to_thread(configure_mlflow, cfg.MLFLOW_TRACKING_URI, cfg.MLFLOW_EXPERIMENT_NAME)
     except Exception:
