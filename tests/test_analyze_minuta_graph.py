@@ -141,26 +141,37 @@ async def test_triage_cutoff_gates_risk_checks(pool, settings, monkeypatch):
     assert out["report_envelope"]["content"]["alerts"] == []
 
 
-async def test_jev_concurrency_is_capped_across_nested_fanouts(pool, settings, monkeypatch):
+async def test_external_call_concurrency_is_capped_across_nested_fanouts(pool, settings, monkeypatch):
+    # O teto e GLOBAL: vale para toda chamada externa do grafo (Jev, LLM e
+    # embeddings), porque fan-outs aninhados multiplicam limites por nivel (bug
+    # c086c93: 64 chamadas simultaneas). O que se observa e o pico de chamadas
+    # em voo na fronteira externa, contra o teto publico do grafo: 8.
     import asyncio
 
     import src.graphs.analyze_minuta_graph as mod
-    from src.clients.jev import call_jev as real
+    from src.clients.jev import call_jev as real_jev
+    from src.clients.llm import chat_completion as real_llm
+    from src.rag.embeddings import embed_text as real_embed
 
     inflight = 0
     peak = 0
 
-    async def spy(state, questions, settings=None):
-        nonlocal inflight, peak
-        inflight += 1
-        peak = max(peak, inflight)
-        await asyncio.sleep(0.005)
-        try:
-            return await real(state, questions, settings)
-        finally:
-            inflight -= 1
+    def tracked(fn):
+        async def spy(*args, **kwargs):
+            nonlocal inflight, peak
+            inflight += 1
+            peak = max(peak, inflight)
+            await asyncio.sleep(0.005)
+            try:
+                return await fn(*args, **kwargs)
+            finally:
+                inflight -= 1
 
-    monkeypatch.setattr(mod, "call_jev", spy)
+        return spy
+
+    monkeypatch.setattr(mod, "call_jev", tracked(real_jev))
+    monkeypatch.setattr(mod, "chat_completion", tracked(real_llm))
+    monkeypatch.setattr(mod, "embed_text", tracked(real_embed))
     await init_db(pool)
     ingest = build_ingest_graph(pool, settings)
     for i in range(6):
@@ -174,7 +185,7 @@ async def test_jev_concurrency_is_capped_across_nested_fanouts(pool, settings, m
     graph = mod.build_analyze_minuta_graph(pool, settings)
     await analyze(graph, raw_text="CONTRATO DE LOCAÇÃO RESIDENCIAL\n" + clausulas, filename="m.txt")
 
-    assert 1 < peak <= mod._CONCURRENCY
+    assert 1 < peak <= 8  # teto publico: nunca mais de 8 chamadas externas simultaneas
 
 
 async def test_tema_map_ids_resolve_to_citation_without_duplicates_or_empty_norms(pool, settings):
