@@ -1,0 +1,28 @@
+{% extends "admin/base_site.html" %}
+{% block title %}Nova análise | {{ site_title }}{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Início</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label='domain' %}">Domain</a>
+  &rsaquo; <a href="{% url 'admin:domain_analysis_changelist' %}">Análises</a>
+  &rsaquo; Nova análise
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  <h1>Nova análise</h1>
+  <p>
+    Envie a minuta (.pdf, .docx ou .txt). O servidor encaminha o arquivo à API da Leia:
+    o texto é mascarado antes de qualquer chamada externa e o nome real do arquivo
+    não sai desta máquina. A análise roda na hora; em seguida você cai no detalhe dela.
+  </p>
+  {% if erro %}<p class="errornote">{{ erro }}</p>{% endif %}
+  <form method="post" enctype="multipart/form-data">{% csrf_token %}
+    {{ form.as_p }}
+    <input type="submit" value="Analisar" class="default">
+    <a href="{% url 'admin:domain_analysis_changelist' %}" class="button cancel-link">Cancelar</a>
+  </form>
+</div>
+{% endblock %}
