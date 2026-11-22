@@ -7,33 +7,16 @@ nunca apague o corpus que voce indexou a mao. Cada teste comeca com o schema
 
 from __future__ import annotations
 
-import os
 from urllib.parse import urlsplit, urlunsplit
 
 import asyncpg
 import pytest
 
 from src.config import Settings
+from tests import _hermetic as hermetic
 from tests._db_guard import SuiteSettings, UnsafeTestDatabaseError, assert_safe_test_database
 
-_CREDENTIAL_SUFFIXES = ("_KEY", "_TOKEN", "_URI")
-_TRACING_OFF = {"LANGSMITH_API_KEY": "", "LANGCHAIN_API_KEY": "", "LANGSMITH_TRACING": "false", "LANGCHAIN_TRACING_V2": "false"}
-
-
-def hermetic_environment() -> dict[str, str]:
-    """Credenciais e URIs externas que a suite nunca herda de quem a roda (ex.: ``shelve run -- pytest``).
-
-    Vem dos campos de ``Settings``: um campo novo terminado em _KEY/_TOKEN/_URI entra sozinho.
-    Um teste que precisa de um deles o define com ``monkeypatch.setenv`` ou no ``Settings`` que monta.
-    """
-    fields = {name: "" for name in Settings.model_fields if name.endswith(_CREDENTIAL_SUFFIXES)}
-    return {**fields, **_TRACING_OFF}
-
-
-os.environ.update(hermetic_environment())
-for _name in Settings.model_fields:
-    if _name.endswith("_BASE_URL"):
-        os.environ.pop(_name, None)
+hermetic.apply()
 
 _SUITE_SETTINGS = SuiteSettings()
 TEST_DATABASE_URL = _SUITE_SETTINGS.TEST_DATABASE_URL
