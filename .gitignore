@@ -29,10 +29,10 @@ leia-kb-legislacao/
 .shelve/
 # end shelve-managed-block
 
-# Dependencias e build gerados (mcp-pangolin: npm install && npm run build)
+# Dependencias geradas
 node_modules/
-mcp-pangolin/dist/
 
 # Estado local de ferramentas de agente
 .great_cto/
 .audit/
+.graphloupe/
