@@ -10,8 +10,8 @@ Atencao: o SDK da LangSmith tambem obedece a ``LANGSMITH_TRACING=true`` no ambie
 variavel desligada e ligue o rastreio so por este bloco.
 
 Servidor de vida longa (API, ``src/api``): ``configure_mlflow`` uma vez na subida e
-``with mlflow_request():`` por requisicao, com flush antes de devolver a resposta. A API nunca
-liga a LangSmith. ``tag_analysis`` amarra o traco a analise e ``find_trace`` recupera o traco
+``with mlflow_request():`` por requisicao; o envio fica com o exportador em segundo plano. A API
+nunca liga a LangSmith. ``tag_analysis`` amarra o traco a analise e ``find_trace`` recupera o traco
 pelo id para linkar do admin (MLflow pode estar fora do ar: fronteira que devolve ``None``).
 
 Os clientes Jev e LLM sao httpx cru, sem instrumentacao automatica: ``client_span`` cria um span
@@ -142,9 +142,13 @@ def configure_mlflow(tracking_uri: str, experiment_name: str) -> None:
     global _MLFLOW_PREV_URI
     _MLFLOW_PREV_URI = os.environ.get("MLFLOW_TRACKING_URI")
     mlflow.set_tracking_uri(tracking_uri)
-    mlflow.tracing.enable()
-    mlflow.set_experiment(experiment_name)
-    mlflow.langchain.autolog(run_tracer_inline=True, silent=True)
+    try:
+        mlflow.tracing.enable()
+        mlflow.set_experiment(experiment_name)
+        mlflow.langchain.autolog(run_tracer_inline=True, silent=True)
+    except Exception:
+        mlflow.set_tracking_uri(_MLFLOW_PREV_URI)  # falhou: o processo volta ao uri de antes
+        raise
 
 
 def shutdown_mlflow() -> None:

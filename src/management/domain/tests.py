@@ -408,6 +408,22 @@ class NovaAnaliseTests(SchemaMixin, TestCase):
 
 
 class AnalysisDetailTests(SchemaMixin, TestCase):
+    def test_trace_ainda_no_lote_pede_para_recarregar_so_em_analise_recente(self):
+        from django.utils import timezone
+
+        self.client.force_login(_user("leitor-lote", group="leitor"))
+        agora = timezone.now()
+        recente = _analysis(started_at=agora - timedelta(seconds=40), finished_at=agora - timedelta(seconds=2))
+        antiga = _analysis(started_at=agora - timedelta(days=1, seconds=40), finished_at=agora - timedelta(days=1))
+        with override_settings(LEIA_MLFLOW_URL="http://mlflow:5000"), mock.patch(
+            "src.tracing.find_trace", return_value=None
+        ):
+            corpo = self.client.get(reverse("admin:domain_analysis_change", args=[recente.id])).content.decode()
+            self.assertIn("recarregue em alguns segundos", corpo)
+            corpo = self.client.get(reverse("admin:domain_analysis_change", args=[antiga.id])).content.decode()
+            self.assertIn("sem trace", corpo)
+            self.assertNotIn("recarregue", corpo)
+
     def test_detalhe_mostra_alertas_duracao_e_sem_trace(self):
         self.client.force_login(_user("leitor-detalhe", group="leitor"))
         with override_settings(LEIA_MLFLOW_URL=""):
