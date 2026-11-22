@@ -5,13 +5,15 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-export OPENROUTER_API_KEY="" TYPESAFE_API_KEY="" LEIA_API_TOKEN="" MLFLOW_TRACKING_URI="" \
-    LANGSMITH_API_KEY="" LANGSMITH_TRACING="false" LANGCHAIN_TRACING_V2="false"
-
 uv sync --frozen --quiet
 py() { uv run --frozen --no-sync python "$@"; }
 
-TEST_DATABASE_URL="$(py -c 'from tests._db_guard import SuiteSettings; print(SuiteSettings().TEST_DATABASE_URL)')"
+TEST_DATABASE_URL="$(py -c '
+from tests._db_guard import SuiteSettings, assert_safe_test_database
+s = SuiteSettings()
+assert_safe_test_database(s.TEST_DATABASE_URL, s.DATABASE_URL)
+print(s.TEST_DATABASE_URL)
+')"
 export TEST_DATABASE_URL
 
 failed=()
@@ -22,9 +24,10 @@ step() {
     if "$@"; then echo "ok  $name"; else echo "FAIL $name"; failed+=("$name"); fi
 }
 
+django_tests() { DATABASE_URL="$TEST_DATABASE_URL" DJANGO_DEBUG="false" py -m src.management.manage test src.management.domain --noinput; }
+
 step pytest py -m pytest -q -p no:cacheprovider
-step django env DATABASE_URL="$TEST_DATABASE_URL" DJANGO_DEBUG="false" \
-    uv run --frozen --no-sync python -m src.management.manage test src.management.domain --noinput
+step django django_tests
 
 if ((${#failed[@]})); then
     echo "ci.sh: failed: ${failed[*]}"
