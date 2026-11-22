@@ -21,7 +21,6 @@ leia-kb-legislacao/**
 **/cf_account*
 
 # --- Untracked local projects and tooling in the main checkout ---
-mcp-pangolin/**
 
 # --- Secrets and local state ---
 .env*

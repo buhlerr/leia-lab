@@ -180,4 +180,4 @@ flowchart LR
 - `docs/research/2026-11-framework-evaluation.md` — §1 (finalistas), §4 (achados por candidato), §5 (contra o Q8), §9.6 (combinações ranqueadas), §10 (MLflow GenAI, adendo leia-lab-1em).
 - Beads `leia-lab-1g1.9` (F), `leia-lab-1g1.4` (B3), `leia-lab-1g1.5` (B4), `leia-lab-1g1.6` (G2), `leia-lab-1g1.7` (esta ADR).
 - `TRACING.md` (branch `prototype/tracing`), `PROTOTYPE.md` (branches `prototype/foundation` e `prototype/management`).
-- Comparativo dos protótipos: `.planning/g2-comparativo.html` (arquivo local; não versionado).
+- Comparativo dos protótipos: [`docs/reviews/2026-11-15-g2-comparativo-prototipos.html`](../reviews/2026-11-15-g2-comparativo-prototipos.html). Código dos protótipos nas tags `archive/prototype-{foundation,tracing,management}`.

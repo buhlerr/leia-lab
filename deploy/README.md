@@ -1,4 +1,4 @@
-# Deploy do admin (Django) no CT 116
+# Deploy do admin (Django) e da API no CT 116
 
 O admin edita as regras (tipos, temas, matriz, prompts) e a base normativa, e mostra histórico,
 análises e trilha **só para leitura**. Em produção fica atrás do Pangolin, em https://admin.rauvbr.com,
@@ -34,6 +34,17 @@ docker run -d --name leia-admin --restart unless-stopped -p 8000:8000 \
 O `migrate` só cria as tabelas do Django e os grupos `editor` (edita regras e base normativa) e
 `leitor` (só vê). Ninguém, nem o superusuário, escreve em histórico, análises ou trilha: o admin
 nega, e o banco também nega por grant e por gatilho.
+
+## API (src/api)
+
+A mesma imagem serve a API: no compose, o serviço `api` troca o entrypoint por `python -m src.api`
+(porta 8080) e lê `DATABASE_URL` e `LEIA_API_TOKEN` de um `api.env`. O login do banco é próprio:
+
+```sql
+CREATE ROLE api_login LOGIN PASSWORD '<senha>' IN ROLE leia_app;   -- grants do motor (leia_app); não é dono das tabelas
+```
+
+Endereço, Pangolin e como atualizar: `docs/OPERACAO.md`.
 
 ## Análise pela tela
 
