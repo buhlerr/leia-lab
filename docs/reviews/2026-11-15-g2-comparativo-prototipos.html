@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LEIA — comparativo dos protótipos (B3 × B4)</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1d2129; --line:#2a2f3a;
+    --txt:#e6e9ef; --dim:#9aa3b2; --faint:#6b7484;
+    --ok:#3ecf8e; --warn:#e3b341; --bad:#e5534b; --accent:#6ea8fe; --accent2:#c792ea;
+    --mono:ui-monospace,SFMono-Regular,"JetBrains Mono","Cascadia Code",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--txt);
+    font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    padding:40px 28px 72px;
+  }
+  .wrap{max-width:1240px;margin:0 auto}
+  header{border-bottom:1px solid var(--line);padding-bottom:22px;margin-bottom:32px}
+  .kicker{font:600 11px/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+  h1{font-size:29px;line-height:1.2;margin:0 0 10px;letter-spacing:-.02em}
+  .sub{color:var(--dim);font-size:14.5px;max-width:78ch}
+  .meta{margin-top:14px;font:12px/1.6 var(--mono);color:var(--faint)}
+  h2{font-size:19px;margin:46px 0 6px;letter-spacing:-.01em}
+  h2 .n{color:var(--accent2);font:600 13px/1 var(--mono);margin-right:9px}
+  .lead{color:var(--dim);font-size:14px;margin:0 0 18px;max-width:82ch}
+
+  table{border-collapse:separate;border-spacing:0;width:100%;font-size:13.5px}
+  th,td{text-align:left;vertical-align:top;padding:11px 13px;border-bottom:1px solid var(--line)}
+  thead th{
+    background:var(--panel2);font:600 12px/1.35 var(--mono);letter-spacing:.05em;
+    text-transform:uppercase;color:var(--dim);border-bottom:1px solid #333a47;position:sticky;top:0
+  }
+  thead th:first-child{border-top-left-radius:8px}
+  thead th:last-child{border-top-right-radius:8px}
+  tbody tr:nth-child(odd) td{background:#141821}
+  td.k{color:var(--dim);font-weight:500;width:190px;white-space:nowrap}
+  td.k small{display:block;color:var(--faint);font:400 11px/1.4 var(--mono);white-space:normal}
+  .col{width:auto}
+
+  .pill{display:inline-block;font:600 10.5px/1 var(--mono);padding:4px 7px;border-radius:5px;letter-spacing:.04em;text-transform:uppercase}
+  .p-ok{background:rgba(62,207,142,.13);color:var(--ok);border:1px solid rgba(62,207,142,.28)}
+  .p-warn{background:rgba(227,179,65,.12);color:var(--warn);border:1px solid rgba(227,179,65,.28)}
+  .p-bad{background:rgba(229,83,75,.12);color:var(--bad);border:1px solid rgba(229,83,75,.28)}
+  .p-neu{background:rgba(110,168,254,.1);color:var(--accent);border:1px solid rgba(110,168,254,.25)}
+
+  .big{font:600 15px/1.3 var(--mono)}
+  .mono{font-family:var(--mono);font-size:12.5px}
+  .ok{color:var(--ok)} .warn{color:var(--warn)} .bad{color:var(--bad)} .dim{color:var(--dim)}
+
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:20px 22px}
+  .card h3{margin:0 0 4px;font-size:16px}
+  .card .tag{font:600 10.5px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+  .card ul{margin:12px 0 0;padding-left:18px;color:var(--dim);font-size:13.5px}
+  .card li{margin-bottom:7px}
+  .card li b{color:var(--txt);font-weight:600}
+  .c1{border-top:3px solid var(--accent)}
+  .c2{border-top:3px solid var(--accent2)}
+
+  .callout{background:linear-gradient(180deg,rgba(110,168,254,.07),rgba(110,168,254,.02));
+    border:1px solid rgba(110,168,254,.22);border-left:3px solid var(--accent);
+    border-radius:9px;padding:16px 19px;margin:20px 0;font-size:14px}
+  .callout b{color:#fff}
+  .warnbox{background:rgba(227,179,65,.06);border:1px solid rgba(227,179,65,.22);border-left:3px solid var(--warn);
+    border-radius:9px;padding:16px 19px;margin:20px 0;font-size:14px;color:var(--dim)}
+  .warnbox b{color:var(--warn)}
+
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--faint);margin:14px 0 0}
+  footer{margin-top:52px;padding-top:20px;border-top:1px solid var(--line);font-size:12.5px;color:var(--faint)}
+  @media (max-width:900px){ .cards{grid-template-columns:1fr} table{font-size:12.5px} td.k{width:auto;white-space:normal} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">leia-lab · épico 1g1 · insumo para a G2</div>
+  <h1>Dois protótipos, lado a lado: registro (B3) e gestão (B4)</h1>
+  <p class="sub">
+    O que foi construído, o que foi <em>medido</em> e onde cada ferramenta entrega ou falha.
+    O motor é variável controlada: <b>LangGraph do master</b> nos dois protótipos — as diferenças
+    abaixo são só das camadas de registro e de gestão.
+  </p>
+  <div class="meta">B3 · <span class="mono">prototype/tracing</span> @ 35dc857 &nbsp;·&nbsp;
+    B4 · <span class="mono">prototype/management</span> @ fa29427 &nbsp;·&nbsp;
+    base comum F · <span class="mono">d9bb787</span> &nbsp;·&nbsp; 15/11/2026</div>
+  <div class="legend">
+    <span><span class="pill p-ok">medido</span> rodado de verdade neste homelab</span>
+    <span><span class="pill p-neu">tabela</span> veio da página de preços/docs</span>
+    <span><span class="pill p-warn">cuidado</span> depende de decisão sua</span>
+  </div>
+</header>
+
+<h2><span class="n">A</span>Camada de registro — B3</h2>
+<p class="lead">
+  As três ferramentas foram ligadas no <b>mesmo grafo</b>, sem tocar no grafo
+  (<span class="mono">analyze()</span> já aceitava <span class="mono">config</span>).
+  A prova de privacidade é empírica: um servidor local captura os payloads reais e verifica que
+  nenhuma PII crua sai — só o texto mascarado.
+</p>
+
+<table>
+  <thead>
+    <tr>
+      <th></th>
+      <th>LangSmith <span style="text-transform:none;font-weight:400">· SaaS</span></th>
+      <th>Langfuse Cloud <span style="text-transform:none;font-weight:400">· SaaS (US)</span></th>
+      <th>Phoenix <span style="text-transform:none;font-weight:400">· self-hosted no CT 116</span></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="k">Como liga <small>esforço de código</small></td>
+      <td>só env vars — <span class="ok">zero código</span></td>
+      <td>OTel/OTLP + Basic <span class="mono">pk:sk</span></td>
+      <td>OTel/OTLP para <span class="mono">:6006</span> + container</td>
+    </tr>
+    <tr>
+      <td class="k">Plano grátis</td>
+      <td class="big">5.000 traços/mês</td>
+      <td class="big">50.000 unidades/mês</td>
+      <td class="big">sem limite de plano</td>
+    </tr>
+    <tr>
+      <td class="k">Limite do grátis <small>usuários · retenção</small></td>
+      <td>1 usuário · 14 dias</td>
+      <td>2 usuários · 30 dias</td>
+      <td>— (o disco é seu)</td>
+    </tr>
+    <tr>
+      <td class="k">Consumo por análise <small>o número que decide a margem</small></td>
+      <td><span class="pill p-ok">medido</span><br><b>1 traço</b> <span class="dim">(9 runs, 1 raiz)</span></td>
+      <td><span class="pill p-ok">medido</span><br><b>~108 unidades</b></td>
+      <td><span class="pill p-ok">medido</span><br><b>107 spans</b></td>
+    </tr>
+    <tr>
+      <td class="k">Unidade cobrada <small>o que gera a margem</small></td>
+      <td>só a <b>raiz</b> da árvore</td>
+      <td>traço <b>+ cada observação</b> + score</td>
+      <td>—</td>
+    </tr>
+    <tr>
+      <td class="k">Quantas análises/mês no grátis</td>
+      <td><b>~5.000</b></td>
+      <td><b>~460</b></td>
+      <td>limitado por RAM/disco do CT</td>
+    </tr>
+    <tr>
+      <td class="k">Nenhum texto cru chega ao serviço</td>
+      <td><span class="pill p-ok">provado</span> captura local</td>
+      <td><span class="pill p-ok">provado</span> captura OTLP</td>
+      <td><span class="pill p-ok">provado</span> + nada sai da LAN</td>
+    </tr>
+    <tr>
+      <td class="k">Gabarito compara 2 versões <small>com rastreio ligado</small></td>
+      <td>✅</td><td>✅</td><td>✅ <span class="dim">matrix_version 0801… → d380…</span></td>
+    </tr>
+    <tr>
+      <td class="k">Registra <em>qual versão da matriz</em> decidiu</td>
+      <td class="bad">não</td><td class="bad">não</td><td class="bad">não</td>
+    </tr>
+    <tr>
+      <td class="k">Custo depois do grátis</td>
+      <td><span class="pill p-neu">tabela</span> Plus US$ 39/assento</td>
+      <td><span class="pill p-neu">tabela</span> Core US$ 29 · Pro US$ 199</td>
+      <td><span class="pill p-neu">tabela</span> AX Pro US$ 50 <span class="dim">(nuvem)</span></td>
+    </tr>
+    <tr>
+      <td class="k">Região no Brasil / LGPD</td>
+      <td class="bad">não</td><td class="bad">não <span class="dim">(US/EU/JP)</span></td>
+      <td><span class="ok">dado fica no homelab</span></td>
+    </tr>
+    <tr>
+      <td class="k">Peso em operação</td>
+      <td><span class="ok">nenhum</span></td>
+      <td><span class="ok">nenhum</span></td>
+      <td><span class="warn">1 container, &lt;1 GB, RAM do CT</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  <b>O teste que faltava, feito:</b> rodei a mesma minuta real (locacao-01) apontando a LangSmith
+  para um capturador local. Ela envia <b>9 runs</b>, mas só <b>1 é raiz</b> — e a doc de billing
+  cobra “All traces”, onde trace = a árvore inteira. Resultado: <b>1 traço por análise</b>,
+  ~5.000 análises/mês. O Langfuse cobra <b>cada observação</b> (~108/análise, ~460/mês).
+  A vantagem de 10× é real e vem da diferença de unidade, não do tamanho do plano.
+</div>
+
+<h2><span class="n">B</span>Camada de gestão — B4</h2>
+<p class="lead">
+  Os dois sobre <b>as mesmas tabelas</b>, no mesmo banco. O critério difícil era o histórico:
+  quem editou aparece em <span class="mono">domain_history.db_user</span>, e apagar é negado
+  para os dois. Medido na mesma linha (<span class="mono">risk_matrix id=4</span>).
+</p>
+
+<table>
+  <thead>
+    <tr>
+      <th></th>
+      <th>Django Admin <span style="text-transform:none;font-weight:400">· CT 116 :8000</span></th>
+      <th>Directus <span style="text-transform:none;font-weight:400">· CT 100 :8055 (já existia)</span></th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="k">Horas para entregar <small>relógio, não esforço</small></td>
+      <td><b>~20 min</b> <span class="dim">planejar → código → testes → deploy; a config da UI (relações, choices, rótulos) veio de graça do código</span></td>
+      <td><b>~5 min</b> apontado o banco <span class="bad">+ ~40 min configurando a UI</span></td>
+    </tr>
+    <tr>
+      <td class="k">O que é preciso configurar <small>para a tela ficar usável</small></td>
+      <td><span class="ok">nada</span> — <span class="mono">ForeignKey</span> vira seletor, <span class="mono">choices</span> vira dropdown</td>
+      <td><span class="warn">coleção + relação + interface + display, à mão</span> <span class="dim">(~15 chamadas de API / cliques)</span></td>
+    </tr>
+    <tr>
+      <td class="k">Licença</td>
+      <td><span class="ok">BSD-3</span> — sem limite de faturamento</td>
+      <td><span class="warn">MSCL</span> — grátis &lt; US$ 5 mi e &lt; 50 pessoas</td>
+    </tr>
+    <tr>
+      <td class="k">CRUD nas 4 tabelas de domínio</td>
+      <td><span class="pill p-ok">sim</span> ModelAdmins + inlines</td>
+      <td><span class="pill p-ok">sim</span> 9 coleções <span class="dim">(só aparecem após configurar o <span class="mono">meta</span>)</span></td>
+    </tr>
+    <tr>
+      <td class="k">Histórico legível <small>history / analyses / trail</small></td>
+      <td>✅ read-only no admin</td>
+      <td>✅ como coleção</td>
+    </tr>
+    <tr>
+      <td class="k">Quem editou fica registrado</td>
+      <td><span class="mono">django_login</span></td>
+      <td><span class="mono">directus_login</span></td>
+    </tr>
+    <tr>
+      <td class="k">Apagar o histórico</td>
+      <td><span class="pill p-bad">negado</span> grant + gatilho</td>
+      <td><span class="pill p-bad">negado</span> gatilho</td>
+    </tr>
+    <tr>
+      <td class="k">Coluna <span class="mono">vector</span> / <span class="mono">tsvector</span></td>
+      <td><span class="ok">VECTOR(1536)</span> + <span class="mono">tsv::text</span></td>
+      <td><span class="warn">tipo “unknown”</span> — opaco</td>
+    </tr>
+    <tr>
+      <td class="k">Base normativa (upload + reindexar)</td>
+      <td><span class="pill p-ok">pronto</span> txt/md/pdf/docx + embeddings</td>
+      <td class="warn">não construído <span class="dim">(daria Flow)</span></td>
+    </tr>
+    <tr>
+      <td class="k">Permissão por campo</td>
+      <td class="bad">não <span class="dim">(por modelo)</span></td>
+      <td><span class="ok">sim</span> <span class="dim">(não exercitado: usei o admin)</span></td>
+    </tr>
+    <tr>
+      <td class="k">Quem não programa edita sozinho</td>
+      <td><span class="pill p-ok">testado pelo usuário</span> mudou criticidade e prompt sem ajuda</td>
+      <td><span class="warn">UI melhor, mas exigiu config prévia</span> <span class="dim">— id digitado antes da correção</span></td>
+    </tr>
+    <tr>
+      <td class="k">Custo mensal</td>
+      <td>US$ 0 <span class="dim">+ código a manter</span></td>
+      <td>US$ 0 self-host <span class="dim">/ US$ 89 Cloud após o grátis</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  <b>O critério duro (Q8) não é atendido por nenhuma ferramenta</b>, e isso ficou provado nas duas
+  beads: o Directus registra a atividade mas <b>não guarda o antes/depois</b>; o Langfuse/LangSmith
+  não sabem <b>qual versão da matriz</b> decidiu. Nos dois protótipos a auditoria de verdade é a
+  trilha no <b>Postgres próprio</b> (design da F) — as ferramentas são a vista de depuração.
+</div>
+
+<h2><span class="n">C</span>As duas combinações que a pesquisa recomendou</h2>
+<p class="lead">Cada protótipo isolado não decide nada; o que vai para a G2 são as combinações.</p>
+
+<div class="cards">
+  <div class="card c1">
+    <div class="tag">Combinação 1 · menor reescrita</div>
+    <h3>LangGraph + LangSmith + Django Admin</h3>
+    <ul>
+      <li><b>A favor:</b> tudo em Python; BSD sem limite de faturamento; foi o menor esforço de
+        registro (só env vars) e o admin já cobre CRUD + base normativa com upload/reindex.</li>
+      <li><b>A favor:</b> maior margem aparente de plano (~5k análises/mês em traços).</li>
+      <li><b>Contra:</b> nenhuma região no Brasil; retenção base de 14 dias; permissão só por
+        modelo; o admin é código que vocês mantêm.</li>
+      <li><b>Risco a fechar:</b> quanto a LangSmith cobra por sub-run — muda a margem.</li>
+    </ul>
+  </div>
+
+  <div class="card c2">
+    <div class="tag">Combinação 2 · dados em casa</div>
+    <h3>LangGraph + Langfuse + Directus</h3>
+    <ul>
+      <li><b>A favor:</b> os dados podem ficar no homelab (Langfuse self-host + Directus +
+        Phoenix já rodando); gestão por configuração, não por código.</li>
+      <li><b>A favor:</b> o Directus já estava de pé — apontar o banco levou ~5 min.</li>
+      <li><b>Contra (corrigido):</b> deixar a tela <em>usável</em> custou mais ~40 min de
+        configuração manual — coleção, relação, interface e display, campo a campo (e isso não está
+        no git). No Django a mesma configuração vem do código, de graça.</li>
+      <li><b>Contra:</b> licença MSCL (elegibilidade a confirmar); margem curta no grátis
+        (~460 análises/mês); <span class="mono">vector</span> opaco; self-host do Langfuse é
+        pesado (ClickHouse + Redis + S3) — não coube no host.</li>
+      <li><b>Risco a fechar:</b> o esforço real de operar o Langfuse self-host.</li>
+    </ul>
+  </div>
+</div>
+
+<h2><span class="n">D</span>O que ficou provado, e o que não</h2>
+<table>
+  <thead><tr><th>Prova</th><th>Situação</th><th>Onde</th></tr></thead>
+  <tbody>
+    <tr><td>Nenhum texto cru sai do processo</td><td><span class="pill p-ok">provado</span></td>
+      <td><span class="mono">tests/test_tracing_privacy.py</span></td></tr>
+    <tr><td>Gabarito compara 2 versões de matriz</td><td><span class="pill p-ok">provado</span></td>
+      <td>B3 · 0801… → d380…</td></tr>
+    <tr><td>Edição por não-dev muda a próxima análise</td><td><span class="pill p-ok">provado</span></td>
+      <td>B4 · <span class="mono">matrix_version</span> muda no <span class="mono">gold-run</span></td></tr>
+    <tr><td>Pessoa sem código edita risco e prompt</td><td><span class="pill p-ok">provado no Django</span></td>
+      <td>usuário mudou R-04 e o prompt <span class="mono">triagem_risco</span> sem ajuda (<span class="mono">db_user=django_login</span>)</td></tr>
+    <tr><td>Histórico imutável nos dois tools</td><td><span class="pill p-ok">provado</span></td>
+      <td>B4 · <span class="mono">DELETE</span> negado nos dois</td></tr>
+    <tr><td>Consumo do grátis por análise</td><td><span class="pill p-ok">medido nas 3</span></td>
+      <td>LangSmith 1 traço · Langfuse ~108 · Phoenix 107 spans</td></tr>
+    <tr><td>Qualidade de detecção real</td><td><span class="bad">não provado</span></td>
+      <td>Jev/LLM offline são stubs — só o mecanismo</td></tr>
+    <tr><td>UI que um advogado usaria sem treino</td><td><span class="pill p-warn">parcial</span></td>
+      <td>Django: sim para CRUD. Directus: só depois de configurar as relações</td></tr>
+  </tbody>
+</table>
+
+<h2><span class="n">E</span>Agora a decisão é sua</h2>
+<div class="callout">
+  <b>O teste manual mudou o placar da gestão.</b> Você usou o Django Admin sem ajuda nenhuma e
+  editou criticidade e prompt — as duas coisas apareceram no histórico como
+  <span class="mono">django_login</span>. No Directus você travou: a tela abriu vazia e o campo de
+  tema pedia um número digitado. A causa não era o Directus ser ruim, era <b>configuração que
+  ninguém tinha feito</b> — e no Django ela vem do código, de graça.<br><br>
+  <b>Se o critério é “entregar a tela com menos trabalho”</b>: Django, claramente.<br><br>
+  <b>Se o critério é “a melhor tela depois de configurada”</b>: o Directus é mais agradável e tem
+  permissão por campo — mas alguém precisa manter essa configuração, e ela não está no git.<br><br>
+  <b>O que não muda em nenhuma escolha:</b> a trilha auditável fica no Postgres próprio (design da F),
+  as ferramentas são a vista de depuração, e o código do motor segue congelado até a ADR-0002.
+</div>
+
+<footer>
+  <div style="margin-bottom:14px;padding:12px 15px;border:1px solid rgba(229,83,75,.28);border-left:3px solid #e5534b;border-radius:8px;color:#d8a6a2;background:rgba(229,83,75,.06)">
+    <b style="color:#e5534b">Correção desta versão (v3):</b> a v1/v2 dizia “9 coleções auto-descobertas” e “~5 min” para o
+    Directus. As duas coisas vieram de teste pela API, que enxerga as tabelas do Postgres mesmo sem
+    metadados — a interface não enxerga. Na prática a tela abriu vazia e o campo de tema pedia id
+    digitado. Os números de tempo da gestão foram corrigidos e o achado está registrado na bead
+    <span class="mono">leia-lab-1g1.5</span>.
+  </div>
+  Fontes dos números de plano: páginas de preço de LangSmith, Langfuse e Arize (nov/2026) cruzadas
+  com a documentação; o consumo por análise foi medido neste homelab.
+  Beads: <span class="mono">leia-lab-1g1.4</span> (B3, fechada) · <span class="mono">leia-lab-1g1.5</span> (B4, fechada)
+  · <span class="mono">leia-lab-1g1.6</span> (G2, aguardando você).
+  Relatórios completos: <span class="mono">TRACING.md</span> na branch de B3 e a nota de B4 na bead.
+</footer>
+
+</div>
+</body>
+</html>
