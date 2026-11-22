@@ -6,6 +6,7 @@ import respx
 from src.clients.jev import call_jev
 from src.clients.llm import chat_completion
 from src.config import Settings
+from src.ingest.masking import mask_payload, mask_personal_data
 
 
 async def test_call_jev_offline_fallback_returns_deterministic_answers():
@@ -22,7 +23,7 @@ async def test_call_jev_offline_fallback_returns_deterministic_answers():
             "criteria": {"true": "Sim", "false": "Nao"},
         },
     }
-    res = await call_jev({"inicio": "CONTRATO DE LOCAÇÃO RESIDENCIAL"}, questions, settings)
+    res = await call_jev(*mask_payload(({"inicio": "CONTRATO DE LOCAÇÃO RESIDENCIAL"}, questions)), settings)
     assert "answers" in res
     assert res["answers"]["tipo"]["choice"] == "locacao_residencial"
     assert isinstance(res["answers"]["risco"]["noul"], float)
@@ -49,8 +50,8 @@ async def test_call_jev_retries_on_429_and_parses_response():
         ]
     )
     res = await call_jev(
-        {"inicio": "Contrato"},
-        {"tipo": {"type": "choice", "instructions": "?", "criteria": {"locacao_residencial": "A"}}},
+        mask_payload({"inicio": "Contrato"}),
+        mask_payload({"tipo": {"type": "choice", "instructions": "?", "criteria": {"locacao_residencial": "A"}}}),
         settings,
     )
     assert route.call_count == 2
@@ -61,7 +62,7 @@ async def test_call_jev_retries_on_429_and_parses_response():
 @respx.mock
 async def test_chat_completion_calls_openrouter_and_offline_fallback():
     offline_settings = Settings(OPENROUTER_API_KEY="")
-    text, tokens = await chat_completion("sys", "Pergunta: qual o prazo?", offline_settings)
+    text, tokens = await chat_completion("sys", mask_personal_data("Pergunta: qual o prazo?"), offline_settings)
     assert isinstance(text, str) and len(text) > 0
     assert tokens == 0
 
@@ -79,7 +80,7 @@ async def test_chat_completion_calls_openrouter_and_offline_fallback():
             },
         )
     )
-    content, used = await chat_completion("sys", "user", online_settings)
+    content, used = await chat_completion("sys", mask_personal_data("user"), online_settings)
     assert content == '{"alertas": []}'
     assert used == 55
 
@@ -87,7 +88,7 @@ async def test_chat_completion_calls_openrouter_and_offline_fallback():
 async def test_chat_completion_offline_alertas_parses_risks_and_clause():
     settings = Settings(OPENROUTER_API_KEY="")
     user = "Riscos:\n- R-01: Reajuste semestral\n- R-02: Multa abusiva\n<clausula>Cláusula 2ª - reajuste.</clausula>"
-    text, tokens = await chat_completion('responda JSON "alertas"', user, settings)
+    text, tokens = await chat_completion('responda JSON "alertas"', mask_personal_data(user), settings)
     data = json.loads(text)
     assert tokens == 0
     assert [a["id"] for a in data["alertas"]] == ["R-01", "R-02"]
@@ -99,5 +100,5 @@ async def test_chat_completion_offline_alertas_parses_risks_and_clause():
 async def test_call_jev_offline_non_locacao_is_nao_suportado():
     settings = Settings(TYPESAFE_API_KEY="")
     q = {"tipo": {"type": "choice", "instructions": "?", "criteria": {"locacao_residencial": "A", "nao_suportado": "B"}}}
-    res = await call_jev({"inicio": "ATA DE ASSEMBLEIA"}, q, settings)
+    res = await call_jev(*mask_payload(({"inicio": "ATA DE ASSEMBLEIA"}, q)), settings)
     assert res["answers"]["tipo"]["choice"] == "nao_suportado"

@@ -1,3 +1,4 @@
+import pytest
 import respx
 
 import src.graphs.query_graph as qg
@@ -6,6 +7,7 @@ from src.db.connection import init_db
 from src.graphs.ingest_graph import build_ingest_graph
 from src.graphs.ingest_graph import ingest as run_ingest
 from src.graphs.query_graph import CONSULTA_PROMPT_TEMPLATE, ask, build_query_graph
+from src.ingest.masking import UnmaskedTextError
 from src.tracing import tracing_session
 from tests._capture import capture  # noqa: F401 - fixture
 
@@ -64,3 +66,15 @@ async def test_question_personal_data_never_reaches_embeddings_llm_or_trace(pool
     blob = "\n".join(sent) + capture.blob.decode() + capture.mlflow_blob.decode()
     assert b"multa de tres alugueis" in capture.blob and b"multa de tres alugueis" in capture.mlflow_blob  # houve traco
     assert [s for s in (NAME, "Mendes", CPF, "99988877766") if s in blob] == []
+
+
+async def test_query_graph_refuses_a_question_that_did_not_go_through_ask(pool, settings, monkeypatch):
+    await init_db(pool)
+
+    async def boom(*a, **k):
+        raise AssertionError("nenhuma chamada ao LLM com a pergunta crua")
+
+    monkeypatch.setattr(qg, "chat_completion", boom)
+    with pytest.raises(UnmaskedTextError, match=r"embed_text\(text\)") as exc:
+        await build_query_graph(pool, settings).ainvoke({"question": QUESTION, "top_k": 4})
+    assert NAME not in str(exc.value) and CPF not in str(exc.value)

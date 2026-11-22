@@ -15,10 +15,13 @@ from src.config import Settings
 from src.db.connection import init_db
 from src.db.seed import seed_defaults
 from src.graphs.analyze_minuta_graph import analyze, build_analyze_minuta_graph
+from src.ingest.masking import mask_payload
 from src.tracing import langsmith_tracing, mlflow_tracing, tracing_session
 from tests._capture import CaptureServer, capture  # noqa: F401 - fixture
 from tests.conftest import TEST_DATABASE_URL
 from tests.test_trail_privacy import FILE_NAME, RAW, SECRETS
+
+JEV_ARGS = mask_payload(({"clausula": "texto [NOME]"}, {"q": {"type": "noul", "instructions": "?"}}))
 
 
 @pytest.fixture
@@ -57,7 +60,7 @@ async def test_api_keys_never_reach_the_trace_on_a_real_client_call(capture):
     s = Settings(TYPESAFE_API_KEY="sk-SEGREDO-DO-JEV", TYPESAFE_BASE_URL="https://jev.invalid/v1/systemone")
     respx.post(s.TYPESAFE_BASE_URL).mock(return_value=httpx.Response(200, json={"answers": {"q": {"noul": 0.9}}}))
     with langsmith_tracing(client=capture.client, project_name="leia-lab-teste"):
-        await call_jev({"clausula": "texto [NOME]"}, {"q": {"type": "noul", "instructions": "?"}}, s)
+        await call_jev(*JEV_ARGS, s)
     assert b"[NOME]" in capture.blob and b"call_jev" in capture.blob
     assert b"SEGREDO" not in capture.blob
 
@@ -117,7 +120,7 @@ async def test_tracing_session_works_with_mlflow_only_and_enforces_allowlist(cap
     respx.post(s.TYPESAFE_BASE_URL).mock(return_value=httpx.Response(200, json={"answers": {"q": {"noul": 0.9}}}))
     with tracing_session() as active:
         assert active["langsmith"] is None and active["mlflow"] == capture.mlflow_uri
-        await call_jev({"clausula": "texto [NOME]"}, {"q": {"type": "noul", "instructions": "?"}}, s)
+        await call_jev(*JEV_ARGS, s)
     assert capture.blob == b""
     assert b"[NOME]" in capture.mlflow_blob and b"call_jev" in capture.mlflow_blob
     assert b"SEGREDO" not in capture.mlflow_blob and b"TYPESAFE_API_KEY" not in capture.mlflow_blob
@@ -135,10 +138,10 @@ async def test_mlflow_tracing_does_not_leak_after_context_exit(capture, monkeypa
     monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
     s = Settings(TYPESAFE_API_KEY="", TYPESAFE_BASE_URL="https://jev.invalid/v1/systemone")
     with mlflow_tracing(tracking_uri=capture.mlflow_uri, experiment_name="leia-lab-teste"):
-        await call_jev({"clausula": "texto [NOME]"}, {"q": {"type": "noul", "instructions": "?"}}, s)
+        await call_jev(*JEV_ARGS, s)
     assert capture.mlflow_bodies
     capture.mlflow_bodies.clear()
-    await call_jev({"clausula": "texto [NOME]"}, {"q": {"type": "noul", "instructions": "?"}}, s)
+    await call_jev(*JEV_ARGS, s)
     assert capture.mlflow_bodies == []
 
 

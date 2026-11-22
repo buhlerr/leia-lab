@@ -6,7 +6,8 @@ Texto de minuta nunca entra em logs nem em mensagens de excecao.
 
 Privacidade: o grafo NUNCA ve texto cru. ``prepare_input`` (usado por ``analyze``/``analyze_stream``)
 le e mascara FORA do grafo, entao nenhum checkpointer, stream ou rastreador recebe o texto original.
-O estado nao tem ``raw_text`` nem ``file_path``, e ``iniciar`` recusa texto que nao esteja mascarado.
+O estado nao tem ``raw_text`` nem ``file_path``, e ``iniciar`` recusa qualquer texto que nao seja
+``MaskedText``. Payloads montados no grafo passam por ``mask_payload`` antes de cada chamada externa.
 Quem envolver o grafo (rastreio, API) tem de chamar ``analyze()``, nunca ``graph.ainvoke`` com texto cru.
 
 Regras: tipos, temas, matriz de riscos e prompts NAO sao argumentos nem constantes. ``iniciar`` le uma
@@ -40,13 +41,12 @@ from src.graphs.minuta_rules import (
     segment_clauses,
     validate_and_format,
 )
-from src.ingest.masking import mask_personal_data, resolve_doc_alias
+from src.ingest.masking import MaskedText, mask_payload, mask_personal_data, require_masked, resolve_doc_alias
 from src.rag.embeddings import EmbeddingResult, embed_text
 from src.rag.hybrid_search import hybrid_search_rrf
 from src.tracing import tag_analysis
 
 _EMPTY_TEXT_MSG = "text must be a non-empty string"
-_UNMASKED_MSG = "graph input needs masked 'text'; use analyze()/prepare_input() (raw text never enters the graph)"
 _CONCURRENCY = 8  # teto global de chamadas externas (Jev, LLM, embeddings) por loop
 _EXCERPT = 200  # caracteres do texto MASCARADO da clausula guardados na trilha
 
@@ -65,8 +65,8 @@ _NC = {"nao_consta": "O contrato nao informa isso, ou nenhuma opcao corresponde.
 
 class AnalyzeMinutaState(TypedDict, total=False):
     # Sem raw_text / file_path / doc_name, de proposito (ver docstring do modulo).
-    filename: str  # apelido publico (documento-<sha8>.<ext>), nunca o nome real
-    text: str  # texto MASCARADO
+    filename: MaskedText  # apelido publico (documento-<sha8>.<ext>), nunca o nome real
+    text: MaskedText
     analysis_id: str
     rules: dict[str, Any]  # conteudo da foto das regras (sem dado pessoal)
     rules_meta: dict[str, Any]  # hash, matrix_version, prompt_version, history_id
@@ -116,7 +116,7 @@ def _type_rules(state: AnalyzeMinutaState) -> dict[str, Any]:
 # ---------------------------------------------------------------- entrada (fora do grafo)
 async def prepare_input(
     *, raw_text: str | None = None, file_path: str | Path | None = None, filename: str = "", doc_name: str = ""
-) -> dict[str, str]:
+) -> dict[str, MaskedText]:
     """Le e mascara localmente. O dict devolvido e a UNICA coisa que entra no grafo."""
     text = raw_text
     if text is None and file_path is not None:
@@ -182,16 +182,16 @@ def build_analyze_minuta_graph(
 
     async def jev(state: dict[str, Any], questions: dict[str, Any]) -> dict[str, Any]:
         async with _limiter():
-            return await call_jev(state, questions, cfg)
+            return await call_jev(mask_payload(state), mask_payload(questions), cfg)
 
     async def embed(text: str) -> EmbeddingResult:
         async with _limiter():
-            return await embed_text(text, cfg)
+            return await embed_text(mask_personal_data(text), cfg)
 
     async def llm(system: str, user: str, model: str | None = None) -> tuple[str, int]:
         use = cfg.model_copy(update={"CHAT_MODEL": model}) if model else cfg
         async with _limiter():
-            return await chat_completion(system, user, use, temperature=0.1, max_tokens=900)
+            return await chat_completion(system, mask_personal_data(user), use, temperature=0.1, max_tokens=900)
 
     async def rec(state: AnalyzeMinutaState, steps: list[dict[str, Any]]) -> None:
         await append_trail(pool, state["analysis_id"], state["rules_meta"], steps)
@@ -217,10 +217,9 @@ def build_analyze_minuta_graph(
         return inner
 
     async def iniciar(state: AnalyzeMinutaState) -> dict[str, Any]:
-        text = state.get("text")
-        # Mascarar e idempotente: texto que muda ao ser mascarado de novo nao passou por prepare_input.
-        if not isinstance(text, str) or not text.strip() or mask_personal_data(text) != text:
-            raise ValueError(_UNMASKED_MSG)
+        # Todo texto que entra no grafo veio de prepare_input: raw_text, file_path ou str comum param aqui.
+        require_masked({"text": "", **state}, what="analyze graph input")
+        text = state["text"]
         alias = state.get("filename", "")
         # Falha alto aqui (RulesConfigError), antes de qualquer chamada externa, se faltar regra.
         snap = await load_rules_snapshot(pool)

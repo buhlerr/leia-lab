@@ -8,6 +8,7 @@ import re
 import httpx
 
 from src.config import Settings
+from src.ingest.masking import MaskedText, requires_masked
 from src.tracing import client_span, tag_span
 
 _RISK_LINE = re.compile(r"^\s*-\s*([^\s:]+)\s*:\s*(.+?)\s*$", re.MULTILINE)
@@ -33,10 +34,11 @@ def _offline(system_prompt: str, user_prompt: str) -> str:
     return json.dumps({"alertas": alertas}, ensure_ascii=False)
 
 
+@requires_masked("user_prompt")
 @client_span("chat_completion", allowed=("system_prompt", "user_prompt", "temperature", "max_tokens"))
 async def chat_completion(
     system_prompt: str,
-    user_prompt: str,
+    user_prompt: MaskedText,
     settings: Settings | None = None,
     *,
     temperature: float = 0.1,

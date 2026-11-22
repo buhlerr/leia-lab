@@ -74,6 +74,9 @@ _Avoid_: dispositivo, lei, fundamento
 Troca de dados pessoais da minuta (nomes, CPF, CNPJ, RG, endereço, telefone, e-mail, CEP, dados bancários) por marcadores como `[NOME]` e `[CPF]`. É obrigatório antes de toda chamada externa. Cobre formatos conhecidos; nomes e endereços atípicos podem escapar.
 _Avoid_: anonimização, redação, sanitização
 
+**Texto mascarado** (`MaskedText`):
+O único texto que pode sair do processo (Jev, LLM, embeddings, traço) ou ser gravado (`analyses`, `kb_chunks`). Só `src/ingest/masking.py` o cria; as funções de fronteira recusam `str` comum com `UnmaskedTextError`.
+
 ## Ambiguidades no código
 
 Termos que o código usa de forma inconsistente. A definição acima é a proposta; o código ainda não a segue.

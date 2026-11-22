@@ -340,13 +340,15 @@ def ingest_upload(filename: str, data: bytes, *, title: str, source: str) -> str
 def reindex_chunks(chunks) -> tuple[int, str]:
     """Recalcula os embeddings dos chunks (offline sem chave, como o resto do motor)."""
     from src.config import Settings
+    from src.ingest.masking import mask_personal_data
     from src.rag.embeddings import embed_text
 
     chunks = list(chunks)
     settings = Settings()
 
     async def embed_all() -> list:
-        return [await embed_text(c.content, settings) for c in chunks]
+        # O conteudo ja foi mascarado na ingestao; mascarar de novo nao o altera e o marca como MaskedText.
+        return [await embed_text(mask_personal_data(c.content), settings) for c in chunks]
 
     results = asyncio.run(embed_all())
     for chunk, res in zip(chunks, results, strict=True):

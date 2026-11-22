@@ -10,17 +10,19 @@ from typing import Any
 import asyncpg
 
 from src.db.rules import RulesSnapshot, canonical_json
+from src.ingest.masking import MaskedText, requires_masked
 
 
+@requires_masked("filename_alias", "masked_text")
 async def start_analysis(
     pool: asyncpg.Pool,
     snap: RulesSnapshot,
     *,
-    filename_alias: str,
-    masked_text: str,
+    filename_alias: MaskedText,
+    masked_text: MaskedText,
     params: dict[str, Any],
 ) -> uuid.UUID:
-    """Insere a analise com o snapshot. So o texto MASCARADO e hasheado; nada cru chega aqui."""
+    """Insere a analise com o snapshot. So o texto MASCARADO e hasheado; str comum e recusada."""
     return await pool.fetchval(
         "INSERT INTO analyses (filename_alias, text_sha256, params, rules_snapshot, rules_hash, "
         "matrix_version, prompt_version, domain_history_id) "
