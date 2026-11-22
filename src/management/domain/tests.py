@@ -334,6 +334,14 @@ class NovaAnaliseTests(SchemaMixin, TestCase):
         cls.leitor = _user("leitor-nova", group="leitor")
         cls.editor = _user("editor-nova", group="editor")
 
+    def test_editor_abre_o_formulario(self):
+        self.client.force_login(self.editor)
+        resp = self.client.get(reverse("admin:domain_analysis_nova"))
+        self.assertEqual(resp.status_code, 200)
+        corpo = resp.content.decode()
+        self.assertIn("Nova análise", corpo)
+        self.assertIn('enctype="multipart/form-data"', corpo)
+
     def test_editor_envia_e_cai_no_detalhe_da_analise(self):
         alvo = _analysis()
         self.client.force_login(self.editor)
