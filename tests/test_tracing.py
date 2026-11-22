@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import uuid
 from urllib.parse import urlsplit
 
 import httpx
@@ -97,6 +98,10 @@ async def test_dual_tracing_sends_masked_nested_traces_to_both_backends(seeded, 
 
     assert len(capture.trace_ids()) == 1
     assert len(capture.mlflow_trace_ids()) == 1
+    # o traco MLflow fica amarrado a analise: a tag leia.analysis_id carrega o id devolvido pelo CLI
+    aid = outs[0]["analysis_id"].encode()
+    tag_pos = capture.mlflow_blob.find(b"leia.analysis_id")
+    assert tag_pos != -1 and aid in capture.mlflow_blob[tag_pos : tag_pos + 120]
     otlp_trace_ids = {sp["traceId"] for sp in capture.mlflow_spans}
     assert len(otlp_trace_ids) == 1
     jev_spans = [sp for sp in capture.mlflow_spans if sp.get("name") == "call_jev"]
@@ -135,6 +140,37 @@ async def test_mlflow_tracing_does_not_leak_after_context_exit(capture, monkeypa
     capture.mlflow_bodies.clear()
     await call_jev({"clausula": "texto [NOME]"}, {"q": {"type": "noul", "instructions": "?"}}, s)
     assert capture.mlflow_bodies == []
+
+
+# ---------------------------------------------------------------- consulta pelo analysis_id
+
+
+def test_find_trace_devolve_none_com_mlflow_fora_do_ar():
+    """O admin tem de renderizar com o MLflow caido: falha de rede vira None, nunca excecao."""
+    from src.tracing import find_trace
+
+    dead = "http://127.0.0.1:1"  # nada escuta na porta 1: conexao recusada
+    assert find_trace(dead, "leia-lab", uuid.uuid4()) is None
+
+
+def test_find_trace_sem_uri_devolve_none():
+    from src.tracing import find_trace
+
+    assert find_trace("", "leia-lab", uuid.uuid4()) is None
+
+
+async def test_find_trace_acha_o_traco_tagueado_na_captura(seeded, settings, capture):
+    """Contra o servidor de captura: o traco gravado numa analise e achavel pelo analysis_id."""
+    from src.tracing import find_trace
+
+    graph = build_analyze_minuta_graph(pool=seeded, settings=settings)
+    with mlflow_tracing(tracking_uri=capture.mlflow_uri, experiment_name="leia-lab-teste"):
+        out = await analyze(graph, raw_text=RAW, filename=FILE_NAME)
+    ref = find_trace(capture.mlflow_uri, "leia-lab-teste", uuid.UUID(out["analysis_id"]))
+    assert ref is not None
+    assert ref.experiment_id == "42"  # o que o servidor de captura devolve em get-by-name
+    assert ref.trace_id.startswith("tr-")
+    assert ref.duration_ms is not None and ref.duration_ms >= 0
 
 
 # ---------------------------------------------------------------- gabarito no CLI

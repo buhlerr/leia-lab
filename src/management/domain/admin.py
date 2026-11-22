@@ -1,5 +1,10 @@
 """Admin da Leia: CRUD nas 4 tabelas de dominio; historico, analises e trilha so leitura;
-base normativa com upload (pelo ``ingest_graph`` do motor) e reindexacao dos embeddings."""
+base normativa com upload (pelo ``ingest_graph`` do motor) e reindexacao dos embeddings.
+
+Analises: o login do admin nao escreve em ``analyses`` (o banco nega por grant + gatilho), entao a
+pagina "Nova analise" envia o arquivo pelo servidor a API (``POST /v1/analyses``) e cai no detalhe
+da analise criada. O detalhe mostra alertas, duracao e, com MLflow configurado, o link do trace.
+"""
 
 from __future__ import annotations
 
@@ -11,12 +16,18 @@ from pathlib import Path
 from typing import Any
 
 import asyncpg
+import httpx
 from django import forms
+from django.conf import settings
 from django.contrib import admin
+from django.core.exceptions import PermissionDenied
 from django.db import connection
+from django.shortcuts import redirect, render
+from django.urls import path
 from django.utils import timezone
 from django.utils.html import format_html
 
+from src.ingest.extract import MAX_UPLOAD_BYTES
 from src.management.domain.models import (
     Analysis,
     AnalysisTrail,
@@ -136,15 +147,140 @@ class TrailInline(admin.TabularInline):
         return False
 
 
+# ---------------------------------------------------------------- nova analise (pela API)
+
+ANALISE_SUFFIXES = (".pdf", ".docx", ".txt")
+API_TIMEOUT_S = 300  # a API roda a analise inteira de forma sincrona; o gunicorn espera 330 s
+
+
+class NovaAnaliseForm(forms.Form):
+    file = forms.FileField(help_text="Minuta .pdf, .docx ou .txt. O nome real do arquivo não sai desta máquina.")
+
+    def clean_file(self):
+        f = self.cleaned_data["file"]
+        if Path(f.name).suffix.lower() not in ANALISE_SUFFIXES:
+            raise forms.ValidationError("Use .pdf, .docx ou .txt.")
+        if f.size > MAX_UPLOAD_BYTES:  # o mesmo teto da API, antes de ler o arquivo na memoria
+            raise forms.ValidationError("O arquivo excede o limite de tamanho permitido.")
+        return f
+
+
+def post_analysis(filename: str, data: bytes) -> tuple[int, dict]:
+    """Envia a minuta à API (multipart, campo ``file``) e devolve ``(status, corpo JSON)``.
+
+    Sem ``LEIA_API_TOKEN`` não faz nenhuma requisição: devolve ``(0, {})``. Falha de rede levanta
+    ``httpx.HTTPError``. O nome do arquivo vai só no multipart: nunca em log, nunca na resposta.
+    """
+    if not settings.LEIA_API_TOKEN:
+        return 0, {}
+    with httpx.Client(timeout=API_TIMEOUT_S) as client:
+        response = client.post(
+            f"{settings.LEIA_API_URL}/v1/analyses",
+            files={"file": (filename, data)},
+            headers={"Authorization": f"Bearer {settings.LEIA_API_TOKEN}"},
+        )
+        try:
+            body = response.json()
+        except ValueError:
+            body = None
+        return response.status_code, body if isinstance(body, dict) else {}
+
+
+def _duracao_humana(seconds: float) -> str:
+    seconds = round(seconds)
+    if seconds < 60:
+        return f"{seconds} s"
+    minutes, s = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes} min {s} s"
+    hours, m = divmod(minutes, 60)
+    return f"{hours} h {m} min"
+
+
 @admin.register(Analysis)
 class AnalysisAdmin(_ReadOnlyAdmin):
     list_display = ("short_id", "status", "filename_alias", "minuta_type", "matrix_version", "prompt_version", "started_at")
     list_filter = ("status", "minuta_type")
     inlines = [TrailInline]
+    change_list_template = "admin/domain/analysis/change_list.html"
+    fields = (
+        "id", "status", "filename_alias", "minuta_type", "matrix_version", "prompt_version",
+        "duracao", "alertas", "trace", "started_at", "finished_at", "text_sha256", "rules_hash",
+        "domain_history_id", "params", "rules_snapshot", "report",
+    )
+    readonly_fields = fields  # tudo é leitura; duracao/alertas/trace são calculados
 
     @admin.display(description="id")
     def short_id(self, obj: Analysis) -> str:
         return str(obj.id)[:8]
+
+    def _pode_nova(self, user) -> bool:
+        return user.is_superuser or user.groups.filter(name="editor").exists()
+
+    def get_urls(self):
+        nova = [path("nova/", self.admin_site.admin_view(self.nova_view), name="domain_analysis_nova")]
+        return nova + super().get_urls()
+
+    def changelist_view(self, request, extra_context=None):
+        extra_context = {**(extra_context or {}), "show_nova": self._pode_nova(request.user)}
+        return super().changelist_view(request, extra_context)
+
+    def nova_view(self, request):
+        """Formulário de upload que o servidor repassa à API; quem grava é a API, não o admin."""
+        if not self._pode_nova(request.user):
+            raise PermissionDenied  # leitor vê a lista e o detalhe, mas não dispara análise
+        erro = None
+        form = NovaAnaliseForm(request.POST or None, request.FILES or None)
+        if request.method == "POST" and form.is_valid():
+            upload = form.cleaned_data["file"]
+            try:
+                status, body = post_analysis(upload.name, upload.read())
+            except httpx.HTTPError:
+                erro = "API indisponível."
+            else:
+                if status == 201 and body.get("analysis_id"):
+                    return redirect("admin:domain_analysis_change", body["analysis_id"])
+                if status == 0:
+                    erro = "Token da API ausente (defina LEIA_API_TOKEN)."
+                else:
+                    erro = str(body.get("message") or "API indisponível.")
+        context = {
+            **self.admin_site.each_context(request),
+            "title": "Nova análise",
+            "form": form,
+            "erro": erro,
+        }
+        return render(request, "admin/domain/analysis/nova.html", context)
+
+    @admin.display(description="duração")
+    def duracao(self, obj: Analysis) -> str:
+        if obj.finished_at is None:
+            return "-"
+        return _duracao_humana((obj.finished_at - obj.started_at).total_seconds())
+
+    @admin.display(description="alertas")
+    def alertas(self, obj: Analysis) -> str:
+        alerts = ((obj.report or {}).get("content") or {}).get("alerts") or []
+        pares = sorted({(a.get("risk_id"), a.get("severity")) for a in alerts})
+        if not pares:
+            return "nenhum"
+        return ", ".join(f"{rid} ({sev})" for rid, sev in pares)
+
+    @admin.display(description="trace")
+    def trace(self, obj: Analysis) -> str:
+        if not settings.LEIA_MLFLOW_URL:
+            return "sem trace"
+        from src.tracing import find_trace
+
+        ref = find_trace(settings.LEIA_MLFLOW_URL, settings.MLFLOW_EXPERIMENT_NAME, obj.id)
+        if ref is None:  # MLflow fora do ar, sem trace ainda ou filtro sem resposta
+            return "sem trace"
+        url = (
+            f"{settings.LEIA_MLFLOW_PUBLIC_URL}/#/experiments/{ref.experiment_id}"
+            f"/traces?selectedEvaluationId={ref.trace_id}"
+        )
+        rotulo = f"trace ({ref.duration_ms} ms)" if ref.duration_ms is not None else "trace"
+        return format_html('<a href="{}" target="_blank" rel="noopener">{}</a>', url, rotulo)
 
 
 @admin.register(AnalysisTrail)

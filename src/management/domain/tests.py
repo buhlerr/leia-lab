@@ -9,10 +9,13 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from datetime import timedelta
 from io import StringIO
 from pathlib import Path
 from unittest import mock
+from uuid import uuid4
 
+import httpx
 from django import forms
 from django.contrib.admin.sites import site
 from django.contrib.auth.models import Group, User
@@ -20,8 +23,11 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
 from django.db import connection
 from django.test import SimpleTestCase, TestCase, TransactionTestCase
+from django.test.utils import override_settings
 from django.urls import reverse
+from django.utils import timezone
 
+import src.management.domain.admin as domain_admin
 from src.management.domain.admin import reindex_chunks, run_with_pool
 from src.management.domain.models import (
     Analysis,
@@ -288,6 +294,138 @@ class AdminSmokeTests(SchemaMixin, TestCase):
             self.assertFalse(model_admin.has_add_permission(None))
             self.assertFalse(model_admin.has_change_permission(None))
             self.assertFalse(model_admin.has_delete_permission(None))
+
+
+# ---------------------------------------------------------------- nova analise (pela API)
+
+
+def _analysis(**extra) -> Analysis:
+    """Uma analise pronta para o detalhe: dois alertas e duracao de ~95 s."""
+    base: dict = dict(
+        id=uuid4(),
+        status="done",
+        filename_alias="documento-ab12cd34.txt",
+        text_sha256="h" * 64,
+        params={},
+        rules_snapshot={},
+        rules_hash="h" * 12,
+        matrix_version="v1",
+        prompt_version="p1",
+        domain_history_id=1,
+        minuta_type="locacao_residencial",
+        report={
+            "content": {
+                "alerts": [
+                    {"risk_id": "R-02", "severity": "yellow", "clause_index": 5},
+                    {"risk_id": "R-01", "severity": "red", "clause_index": 2},
+                ]
+            }
+        },
+        started_at=timezone.now() - timedelta(seconds=95),
+        finished_at=timezone.now(),
+    )
+    base.update(extra)
+    return Analysis.objects.create(**base)
+
+
+class NovaAnaliseTests(SchemaMixin, TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.leitor = _user("leitor-nova", group="leitor")
+        cls.editor = _user("editor-nova", group="editor")
+
+    def test_editor_abre_o_formulario(self):
+        self.client.force_login(self.editor)
+        resp = self.client.get(reverse("admin:domain_analysis_nova"))
+        self.assertEqual(resp.status_code, 200)
+        corpo = resp.content.decode()
+        self.assertIn("Nova análise", corpo)
+        self.assertIn('enctype="multipart/form-data"', corpo)
+
+    def test_editor_envia_e_cai_no_detalhe_da_analise(self):
+        alvo = _analysis()
+        self.client.force_login(self.editor)
+        upload = SimpleUploadedFile("Minuta-do-Carlos.txt", b"CONTRATO DE LOCACAO")
+        with mock.patch.object(domain_admin, "post_analysis", return_value=(201, {"analysis_id": str(alvo.id)})) as post:
+            resp = self.client.post(reverse("admin:domain_analysis_nova"), {"file": upload})
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], reverse("admin:domain_analysis_change", args=[alvo.id]))
+        self.assertEqual(post.call_count, 1)
+
+    def test_leitor_recebe_403_ao_enviar_e_ao_abrir(self):
+        self.client.force_login(self.leitor)
+        url = reverse("admin:domain_analysis_nova")
+        self.assertEqual(self.client.get(url).status_code, 403)
+        upload = SimpleUploadedFile("minuta.txt", b"CONTRATO DE LOCACAO")
+        self.assertEqual(self.client.post(url, {"file": upload}).status_code, 403)
+
+    def test_erro_da_api_aparece_e_o_nome_do_arquivo_nunca(self):
+        self.client.force_login(self.editor)
+        upload = SimpleUploadedFile("Minuta-do-Carlos-Mendes.txt", b"CONTRATO DE LOCACAO")
+        erro_api = {"code": "invalid_document", "message": "O documento enviado não pode ser lido."}
+        with mock.patch.object(domain_admin, "post_analysis", return_value=(422, erro_api)):
+            resp = self.client.post(reverse("admin:domain_analysis_nova"), {"file": upload})
+        self.assertEqual(resp.status_code, 200)  # formulario volta com a mensagem da API
+        corpo = resp.content.decode()
+        self.assertIn("O documento enviado não pode ser lido.", corpo)
+        self.assertNotIn("Minuta-do-Carlos-Mendes", corpo)
+
+    def test_erro_de_rede_mostra_mensagem_fixa(self):
+        self.client.force_login(self.editor)
+        upload = SimpleUploadedFile("minuta.txt", b"CONTRATO DE LOCACAO")
+        with mock.patch.object(domain_admin, "post_analysis", side_effect=httpx.ConnectError("boom")):
+            resp = self.client.post(reverse("admin:domain_analysis_nova"), {"file": upload})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("API indisponível", resp.content.decode())
+
+    def test_sem_token_mensagem_fixa_e_sem_requisicao(self):
+        self.client.force_login(self.editor)
+        upload = SimpleUploadedFile("Minuta-do-Carlos.txt", b"CONTRATO DE LOCACAO")
+        with override_settings(LEIA_API_TOKEN=""):
+            resp = self.client.post(reverse("admin:domain_analysis_nova"), {"file": upload})
+        self.assertEqual(resp.status_code, 200)  # formulario volta com mensagem fixa
+        corpo = resp.content.decode()
+        self.assertIn("LEIA_API_TOKEN", corpo)
+        self.assertNotIn("Minuta-do-Carlos", corpo)
+        # direto da funcao de envio: sem token nao ha requisicao (uma tentativa falharia alto)
+        with override_settings(LEIA_API_TOKEN=""):
+            self.assertEqual(domain_admin.post_analysis("a.txt", b"x"), (0, {}))
+        # sufixo invalido: o formulario barra antes de qualquer chamada
+        upload_x = SimpleUploadedFile("planilha.xlsx", b"x")
+        with mock.patch.object(domain_admin, "post_analysis") as post_x:
+            resp = self.client.post(reverse("admin:domain_analysis_nova"), {"file": upload_x})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("Use .pdf, .docx ou .txt.", resp.content.decode())
+        post_x.assert_not_called()
+
+    def test_botao_nova_analise_no_changelist_so_para_editor(self):
+        self.client.force_login(self.editor)
+        corpo = self.client.get(reverse("admin:domain_analysis_changelist")).content.decode()
+        self.assertIn(reverse("admin:domain_analysis_nova"), corpo)
+        self.client.force_login(self.leitor)
+        corpo = self.client.get(reverse("admin:domain_analysis_changelist")).content.decode()
+        self.assertNotIn(reverse("admin:domain_analysis_nova"), corpo)
+
+
+class AnalysisDetailTests(SchemaMixin, TestCase):
+    def test_detalhe_mostra_alertas_duracao_e_sem_trace(self):
+        self.client.force_login(_user("leitor-detalhe", group="leitor"))
+        with override_settings(LEIA_MLFLOW_URL=""):
+            a = _analysis()
+            resp = self.client.get(reverse("admin:domain_analysis_change", args=[a.id]))
+            self.assertEqual(resp.status_code, 200)
+            corpo = resp.content.decode()
+            self.assertIn("R-01 (red)", corpo)
+            self.assertIn("R-02 (yellow)", corpo)
+            self.assertIn("1 min 35 s", corpo)
+            self.assertIn("sem trace", corpo)
+
+            correndo = _analysis(status="running", finished_at=None, report=None, minuta_type=None)
+            resp = self.client.get(reverse("admin:domain_analysis_change", args=[correndo.id]))
+            self.assertEqual(resp.status_code, 200)
+            detalhe = site._registry[Analysis]
+            self.assertEqual(detalhe.duracao(correndo), "-")
+            self.assertEqual(detalhe.alertas(correndo), "nenhum")
 
 
 # ---------------------------------------------------------------- base normativa

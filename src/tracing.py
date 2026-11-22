@@ -9,6 +9,11 @@ ambiente, nunca de arquivo do repo.
 Atencao: o SDK da LangSmith tambem obedece a ``LANGSMITH_TRACING=true`` no ambiente; deixe essa
 variavel desligada e ligue o rastreio so por este bloco.
 
+Servidor de vida longa (API, ``src/api``): ``configure_mlflow`` uma vez na subida e
+``with mlflow_request():`` por requisicao, com flush antes de devolver a resposta. A API nunca
+liga a LangSmith. ``tag_analysis`` amarra o traco a analise e ``find_trace`` recupera o traco
+pelo id para linkar do admin (MLflow pode estar fora do ar: fronteira que devolve ``None``).
+
 Os clientes Jev e LLM sao httpx cru, sem instrumentacao automatica: ``client_span`` cria um span
 por chamada nos backends ativos. Ele recebe uma lista de argumentos PERMITIDOS: ``settings``
 (chaves de API, senha do banco no DATABASE_URL) nunca entra no traco.
@@ -18,10 +23,12 @@ from __future__ import annotations
 
 import inspect
 import os
+import uuid
 from collections.abc import Callable, Iterator
 from contextlib import ExitStack, contextmanager
 from contextvars import ContextVar
-from functools import wraps
+from dataclasses import dataclass
+from functools import lru_cache, wraps
 from typing import Any
 
 import mlflow
@@ -29,8 +36,16 @@ import mlflow.langchain
 from langsmith import Client, traceable
 from langsmith.run_helpers import get_current_run_tree, tracing_context
 from mlflow.entities import SpanType
+from mlflow.tracing.client import TracingClient
 
 _MLFLOW_ACTIVE: ContextVar[bool] = ContextVar("_mlflow_active", default=False)
+
+# Tag que amarra um traco (LangSmith ou MLflow) a uma analise: e o analysis_id da linha em
+# ``analyses``. Chave com ponto exige crases no filtro de busca do MLflow.
+ANALYSIS_TAG = "leia.analysis_id"
+
+# Tracking uri que o processo tinha antes de ``configure_mlflow`` (None = nao tinha).
+_MLFLOW_PREV_URI: str | None = None
 
 
 def client_span(name: str, allowed: tuple[str, ...]) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -88,6 +103,19 @@ def tag_span(**metadata: Any) -> None:
             span.set_attributes({k: v for k, v in metadata.items() if v is not None})
 
 
+def tag_analysis(analysis_id: str) -> None:
+    """Amarra o traco atual a analise: metadata no run da LangSmith, tag ``ANALYSIS_TAG`` no MLflow.
+
+    No-op com o rastreio desligado. Chamado no no ``iniciar`` logo depois do id existir, entao
+    vale para o CLI (``--trace``) e para a API.
+    """
+    run = get_current_run_tree()
+    if run is not None:
+        run.metadata.update({"analysis_id": analysis_id})
+    if _MLFLOW_ACTIVE.get():
+        mlflow.update_current_trace(tags={ANALYSIS_TAG: analysis_id})
+
+
 @contextmanager
 def langsmith_tracing(client: Client | None = None, project_name: str | None = None) -> Iterator[Client]:
     """Liga o rastreio na LangSmith dentro do bloco e espera o envio ao sair."""
@@ -103,6 +131,33 @@ def langsmith_tracing(client: Client | None = None, project_name: str | None = N
             client.flush()
 
 
+def configure_mlflow(tracking_uri: str, experiment_name: str) -> None:
+    """Configura o MLflow do PROCESSO: uri, tracing, experimento e autolog do LangChain.
+
+    Uma vez na subida de um servidor de vida longa (lifespan da API). Para o bloco curto do CLI
+    use ``mlflow_tracing``, que desfaz tudo ao sair. ``shutdown_mlflow`` desfaz o que esta
+    funcao fez: sem ela, o ``set_tracking_uri`` abaixo grava a variavel de ambiente
+    ``MLFLOW_TRACKING_URI`` (heranca para subprocessos) e ela vaza para o resto do processo.
+    """
+    global _MLFLOW_PREV_URI
+    _MLFLOW_PREV_URI = os.environ.get("MLFLOW_TRACKING_URI")
+    mlflow.set_tracking_uri(tracking_uri)
+    mlflow.tracing.enable()
+    mlflow.set_experiment(experiment_name)
+    mlflow.langchain.autolog(run_tracer_inline=True, silent=True)
+
+
+def shutdown_mlflow() -> None:
+    """Desfaz o ``configure_mlflow`` na descida do servidor.
+
+    Desliga o autolog, descarrega o que falta na fila e devolve o tracking uri que o processo
+    tinha antes (``None`` desconfigura e apaga a variavel de ambiente).
+    """
+    mlflow.langchain.autolog(disable=True, silent=True)
+    mlflow.flush_trace_async_logging()
+    mlflow.set_tracking_uri(_MLFLOW_PREV_URI)
+
+
 @contextmanager
 def mlflow_tracing(tracking_uri: str | None = None, experiment_name: str | None = None) -> Iterator[str]:
     """Liga o rastreio na MLflow dentro do bloco e faz flush ao sair."""
@@ -113,10 +168,7 @@ def mlflow_tracing(tracking_uri: str | None = None, experiment_name: str | None 
     prev_uri = mlflow.get_tracking_uri()
     token = _MLFLOW_ACTIVE.set(True)
     try:
-        mlflow.set_tracking_uri(uri)
-        mlflow.tracing.enable()
-        mlflow.set_experiment(exp)
-        mlflow.langchain.autolog(run_tracer_inline=True, silent=True)
+        configure_mlflow(uri, exp)
         yield uri
     finally:
         _MLFLOW_ACTIVE.reset(token)
@@ -127,6 +179,83 @@ def mlflow_tracing(tracking_uri: str | None = None, experiment_name: str | None 
                 mlflow.flush_trace_async_logging()
             finally:
                 mlflow.set_tracking_uri(prev_uri)
+
+
+@contextmanager
+def mlflow_request() -> Iterator[None]:
+    """Uma requisicao num servidor ja configurado por ``configure_mlflow``.
+
+    Ativa o rastreio so dentro do bloco (os spans dos clientes olham ``_MLFLOW_ACTIVE``). O envio
+    fica com o exportador em segundo plano do MLflow: descarregar a fila aqui travaria o event loop
+    da API inteira enquanto o MLflow estivesse lento ou fora do ar.
+    """
+    token = _MLFLOW_ACTIVE.set(True)
+    try:
+        yield
+    finally:
+        _MLFLOW_ACTIVE.reset(token)
+
+
+@dataclass(frozen=True)
+class TraceRef:
+    """Referencia minima a um traco no MLflow: o que o admin precisa para linkar e mostrar."""
+
+    experiment_id: str
+    trace_id: str
+    duration_ms: int | None
+
+
+# O padrao do MLflow e 120 s por chamada com 7 retentativas: minutos de espera se o servidor
+# cair. Servidores de vida longa (API, admin) usam chamadas curtas; o operador ainda manda.
+_SHORT_MLFLOW_HTTP_ENV = {
+    "MLFLOW_HTTP_REQUEST_TIMEOUT": "5",
+    "MLFLOW_HTTP_REQUEST_MAX_RETRIES": "1",
+    "MLFLOW_HTTP_REQUEST_BACKOFF_FACTOR": "1",
+}
+
+
+def use_short_mlflow_http() -> None:
+    """Chamadas curtas ao MLflow no processo inteiro, sem sobrescrever o que o operador definiu."""
+    for key, value in _SHORT_MLFLOW_HTTP_ENV.items():
+        os.environ.setdefault(key, value)
+
+
+@lru_cache(maxsize=4)
+def _trace_client(tracking_uri: str) -> TracingClient:
+    return TracingClient(tracking_uri=tracking_uri)
+
+
+def find_trace(tracking_uri: str, experiment_name: str, analysis_id: uuid.UUID) -> TraceRef | None:
+    """Acha o traco de uma analise pelo tag ``ANALYSIS_TAG``, ou ``None``.
+
+    Fronteira: ``analysis_id`` e um ``uuid.UUID`` (o valor interpolado no filtro e seguro) e
+    qualquer falha (MLflow fora do ar, experimento inexistente, resposta estranha) vira ``None``,
+    nunca excecao. O cliente usa o ``tracking_uri`` dado, nunca o global do processo.
+    """
+    if not tracking_uri:
+        return None
+    use_short_mlflow_http()
+    try:
+        client = _trace_client(tracking_uri)
+        experiment = client.store.get_experiment_by_name(experiment_name)
+        if experiment is None:
+            return None
+        found = client.search_traces(
+            experiment_ids=[experiment.experiment_id],
+            filter_string=f"tags.`{ANALYSIS_TAG}` = '{analysis_id}'",
+            max_results=1,
+            include_spans=False,
+        )
+        if not found:
+            return None
+        info = found[0].info
+        return TraceRef(
+            experiment_id=experiment.experiment_id,
+            trace_id=info.trace_id,
+            duration_ms=info.execution_duration,
+        )
+    except Exception:
+        return None
 
 
 @contextmanager

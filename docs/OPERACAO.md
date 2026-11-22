@@ -109,6 +109,22 @@ junto se o job incluir o host, ou o CT 116 inteiro via vzdump.
   painel da conta). A auditoria **não** depende deles: ela está em `analysis_trail` no Postgres.
 - **Apagar:** apagar o projeto `leia-lab` na LangSmith remove todos os traços de uma vez.
 
+## Rastreio da API: MLflow self-hosted
+
+A API grava um trace MLflow por análise quando o `api.env` define `MLFLOW_TRACKING_URI`
+(`http://leia-mlflow:5000`). Sem a variável, nada sai da API. O trace é marcado com
+`leia.analysis_id` e o detalhe da análise no admin linka o trace no MLflow.
+
+- **O que vai:** só conteúdo mascarado, a mesma política do `--trace` do CLI. A LangSmith fica
+  fora da API.
+- **Quem vê:** quem alcança o MLflow interno (`LEIA_MLFLOW_PUBLIC_URL`, hoje
+  https://mlflow.rauvbr.com).
+- **Admin:** a página **Nova análise** envia o arquivo pelo servidor à API
+  (`LEIA_API_URL`/`LEIA_API_TOKEN` no `django.env`). O link do trace precisa de `LEIA_MLFLOW_URL`
+  no `django.env`; sem ela o detalhe mostra "sem trace".
+- **Apagar:** os traces ficam no MLflow do homelab; apagar o experimento `leia-lab` remove todos.
+  A auditoria segue no Postgres (`analysis_trail`).
+
 ## Limite do plano
 
 ```bash

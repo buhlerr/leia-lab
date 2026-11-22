@@ -21,6 +21,7 @@ from src.db.connection import init_db
 from src.graphs.ingest_graph import build_ingest_graph
 from src.graphs.ingest_graph import ingest as run_ingest
 from src.ingest.extract import MAX_UPLOAD_BYTES
+from tests._capture import capture  # noqa: F401 - fixture
 from tests._db_guard import SuiteSettings
 from tests._rules_helper import use_rules
 
@@ -57,6 +58,7 @@ def api_settings() -> Settings:
         OPENROUTER_API_KEY="",
         TYPESAFE_API_KEY="",
         LEIA_API_TOKEN=TOKEN,
+        MLFLOW_TRACKING_URI="",  # nunca herdar o MLflow real do ambiente de quem roda a suite
     )
 
 
@@ -204,3 +206,75 @@ async def test_get_unknown_uuid_returns_404_and_bad_uuid_returns_422(pool, api_s
 
         r = await client.get("/v1/analyses/nao-e-um-uuid", headers=_auth())
         assert r.status_code == 422
+
+
+# ---------------------------------------------------------------- rastreio MLflow da API
+
+
+def _mlflow_settings(cap) -> Settings:
+    """Settings da API com o MLflow apontando ao servidor de captura."""
+    return Settings(
+        DATABASE_URL=TEST_DATABASE_URL,
+        OPENROUTER_API_KEY="",
+        TYPESAFE_API_KEY="",
+        LEIA_API_TOKEN=TOKEN,
+        MLFLOW_TRACKING_URI=cap.mlflow_uri,
+        MLFLOW_EXPERIMENT_NAME="leia-lab-teste",
+    )
+
+
+async def test_post_com_mlflow_grava_um_trace_tagueado_e_sem_dado_pessoal(pool, api_settings, capture) -> None:
+    """Requisicao com MLflow configurado: 1 traco, tagueado com o analysis_id, so conteudo mascarado."""
+    await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
+
+    async with api_client(_mlflow_settings(capture)) as client:
+        r = await client.post(
+            "/v1/analyses",
+            files={"file": ("Joao-da-Silva-contrato.txt", _MINUTA.encode("utf-8"), "text/plain")},
+            headers=_auth(),
+        )
+        assert r.status_code == 201, r.text
+        aid = r.json()["analysis_id"]
+
+    assert len(capture.mlflow_trace_ids()) == 1  # exatamente um traco por analise
+    blob = capture.mlflow_blob.lower()
+    tag_pos = blob.find(b"leia.analysis_id")
+    assert tag_pos != -1 and aid.encode() in blob[tag_pos : tag_pos + 120]  # a tag carrega o id
+    for secret in ("joao-da-silva", "carlos eduardo mendes", "999.888.777-66", "99988877766"):
+        assert secret.encode() not in blob, secret  # nada do documento real chega ao MLflow
+    assert b"[nome]" in blob and b"[cpf]" in blob  # o texto mascarado e o que vai
+
+    # Apos a app descer o autolog esta desligado: rodar o grafo direto nao manda mais nada.
+    capture.mlflow_bodies.clear()
+    from src.graphs.analyze_minuta_graph import analyze, build_analyze_minuta_graph
+
+    graph = build_analyze_minuta_graph(pool, api_settings)
+    await analyze(graph, raw_text=_MINUTA, filename="depois-do-shutdown.txt")
+    assert capture.mlflow_bodies == []
+
+
+async def test_post_sem_mlflow_configurado_nao_envia_nada(pool, api_settings, capture) -> None:
+    await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
+
+    async with api_client(api_settings) as client:
+        r = await client.post(
+            "/v1/analyses",
+            files={"file": ("sem-mlflow.txt", _MINUTA.encode("utf-8"), "text/plain")},
+            headers=_auth(),
+        )
+        assert r.status_code == 201, r.text
+    assert capture.mlflow_bodies == []
+
+
+async def test_api_sobe_e_analisa_com_o_mlflow_fora_do_ar(pool, api_settings) -> None:
+    """O rastreio e opcional: MLflow inacessivel na subida nao derruba nem trava a API."""
+    await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
+    down = api_settings.model_copy(update={"MLFLOW_TRACKING_URI": "http://127.0.0.1:9"})
+
+    async with api_client(down) as client:
+        r = await client.post(
+            "/v1/analyses",
+            files={"file": ("mlflow-fora.txt", _MINUTA.encode("utf-8"), "text/plain")},
+            headers=_auth(),
+        )
+        assert r.status_code == 201, r.text

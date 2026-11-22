@@ -1,0 +1,7 @@
+{% extends "admin/change_list.html" %}
+{% block object-tools-items %}
+  {% if show_nova %}
+    <li><a href="{% url 'admin:domain_analysis_nova' %}" class="addlink">Nova análise</a></li>
+  {% endif %}
+  {{ block.super }}
+{% endblock %}

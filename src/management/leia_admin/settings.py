@@ -10,6 +10,12 @@ Variaveis de ambiente:
 * ``DJANGO_BEHIND_HTTPS_PROXY``: ``true`` quando o admin fica atras do Pangolin (HTTPS termina no
   proxy): o Django confia no ``X-Forwarded-Proto`` e os cookies de sessao/CSRF viram ``Secure``.
   So ligue com a porta do admin fechada para tudo que nao seja o proxy (o cabecalho e forjavel).
+* ``LEIA_API_URL``/``LEIA_API_TOKEN``: a API que roda a analise. A pagina "Nova analise" envia o
+  arquivo pelo servidor; o login do admin nao escreve em ``analyses`` (grant + gatilho), quem
+  escreve e a API com o token de servico.
+* ``LEIA_MLFLOW_URL``: MLflow interno para achar o trace de uma analise (vazio = sem trace).
+  ``LEIA_MLFLOW_PUBLIC_URL``: o mesmo MLflow pelo endereco que o navegador alcanca (link do trace).
+  ``MLFLOW_EXPERIMENT_NAME``: experimento onde a API grava os traces (padrao ``leia-lab``).
 """
 
 import os
@@ -112,3 +118,11 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# API da Leia (roda a analise) e MLflow (onde o trace dela fica). A pagina "Nova analise"
+# envia o arquivo pelo servidor com o token de servico; o trace e linkado no detalhe.
+LEIA_API_URL = os.environ.get("LEIA_API_URL", "http://leia-api:8080").rstrip("/")
+LEIA_API_TOKEN = os.environ.get("LEIA_API_TOKEN", "")
+LEIA_MLFLOW_URL = os.environ.get("LEIA_MLFLOW_URL", "")  # interno, para busca (vazio = sem trace)
+LEIA_MLFLOW_PUBLIC_URL = os.environ.get("LEIA_MLFLOW_PUBLIC_URL", "https://mlflow.rauvbr.com").rstrip("/")
+MLFLOW_EXPERIMENT_NAME = os.environ.get("MLFLOW_EXPERIMENT_NAME", "leia-lab")
