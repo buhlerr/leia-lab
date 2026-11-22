@@ -1,5 +1,12 @@
+import copy
+import pickle
+
+import pytest
+
 from src.config import Settings
 from src.ingest.masking import (
+    MaskedText,
+    UnmaskedTextError,
     mask_personal_data,
     resolve_doc_alias,
     split_contract_text,
@@ -53,7 +60,7 @@ def test_resolve_doc_alias_hashes_when_doc_name_empty():
 def test_split_contract_text_respects_size_and_overlap():
     paragraphs = [f"Paragrafo {i}: " + ("x" * 280) for i in range(10)]
     text = "\n".join(paragraphs)
-    chunks = split_contract_text(text, chunk_size=600, chunk_overlap=100, separator="\n")
+    chunks = split_contract_text(mask_personal_data(text), chunk_size=600, chunk_overlap=100, separator="\n")
     assert len(chunks) >= 5
     assert all(len(c) <= 600 for c in chunks)
 
@@ -72,3 +79,20 @@ def test_mask_longer_names_first_and_ignores_contract_terms():
     assert "LOCADOR:" in masked
     assert "Contrato" in masked
     assert mask_personal_data("CLÁUSULA Primeira, brasileira, casada") == "CLÁUSULA Primeira, brasileira, casada"
+
+
+def test_masked_text_is_created_only_by_the_masking_module():
+    with pytest.raises(TypeError, match="mask_personal_data"):
+        MaskedText("LOCADOR: Ana Maria Silva")
+    masked = mask_personal_data("LOCADOR: Ana Maria Silva, brasileira")
+    assert isinstance(masked, MaskedText) and mask_personal_data(masked) is masked
+    assert isinstance(resolve_doc_alias("minuta_Ana.pdf"), MaskedText)
+    assert type(masked[:5]) is str and type(masked + "x") is str  # derivado volta a ser texto comum
+    assert pickle.loads(pickle.dumps(masked)) == masked and isinstance(copy.deepcopy(masked), MaskedText)
+
+
+def test_split_refuses_unmasked_text_and_keeps_chunks_masked():
+    with pytest.raises(UnmaskedTextError, match="split_contract_text"):
+        split_contract_text("Paragrafo 1\nParagrafo 2")
+    chunks = split_contract_text(mask_personal_data("Paragrafo 1\nParagrafo 2"), chunk_size=12, chunk_overlap=0)
+    assert chunks == ["Paragrafo 1", "Paragrafo 2"] and all(isinstance(c, MaskedText) for c in chunks)
