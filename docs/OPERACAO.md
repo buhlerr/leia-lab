@@ -92,9 +92,24 @@ op run --env-file=.env.op -- scripts/linear-sync.sh --dry-run   # ver antes
 op run --env-file=.env.op -- scripts/linear-sync.sh             # sincronizar
 ```
 
-O script faz três passos: puxa tudo do Linear, envia as tarefas abertas e envia as fechadas que já estão
-no Linear (para irem a Done lá). **Não rode `bd linear sync` puro:** ele enviaria as 62 tarefas fechadas
-antes do espelho, que ficam só no Beads.
+O script (`scripts/linear_sync.py`) só age quando algo mudou:
+
+1. Pergunta ao Linear se alguma issue do time mudou desde a última rodada; só então puxa.
+2. Envia só os beads novos ou alterados (hash de título, descrição, status, prioridade, rótulos e pai):
+   os abertos e os fechados que já estão no Linear (para irem a Done lá).
+3. Põe no projeto **`leia-lab`** do Linear toda issue deste repo que esteja sem projeto, e tira o
+   responsável das issues que acabou de criar: o Linear as atribui ao dono da chave de API, e a puxada
+   levaria isso ao Beads, onde um responsável trava `bd ready --unassigned` e o `bd close` dos agentes.
+   Atribuir-se a mão no Linear continua valendo e chega ao Beads.
+
+O estado (hashes e horário da última rodada) fica em `.local/linear-sync-state.json`, fora do git e por
+máquina; sem ele, a rodada é completa (cerca de 40 s). Sem mudanças, a rodada leva uns 2 s. Para forçar
+uma rodada completa, apague esse arquivo.
+
+**Não rode `bd linear sync` puro:** ele enviaria as 62 tarefas fechadas antes do espelho, que ficam só no
+Beads. Não use `linear.project_id`: no `bd` ele restringe a sincronização a um projeto e bloqueia a
+criação de issues novas. Um projeto do Linear por repositório (`PROJECT` no `linear_sync.py`); os épicos
+do Beads continuam como issues-pai dentro do projeto.
 
 - Estados: `open` → Todo, `in_progress` → In Progress, `closed` → Done. Na volta, Backlog e Todo viram
   `open`, In Progress e In Review viram `in_progress`, Done, Canceled e Duplicate viram `closed`.
