@@ -556,3 +556,18 @@ class RootRedirectTests(SimpleTestCase):
         # O SSO do Pangolin devolve para https://admin.rauvbr.com/; a raiz nao pode dar 404.
         response = self.client.get("/")
         self.assertRedirects(response, "/admin/", fetch_redirect_response=False)
+
+
+class HermeticTests(SimpleTestCase):
+    """O admin sob teste nao herda credencial nem servico real (tests/_hermetic.py)."""
+
+    def test_admin_settings_point_at_no_real_service(self):
+        from django.conf import settings as dj
+        from langsmith.utils import tracing_is_enabled
+
+        from src.config import Settings
+
+        loaded = Settings()
+        self.assertEqual((loaded.OPENROUTER_API_KEY, loaded.TYPESAFE_API_KEY, loaded.MLFLOW_TRACKING_URI), ("", "", ""))
+        self.assertEqual((dj.LEIA_MLFLOW_URL, dj.LEIA_API_TOKEN, dj.LEIA_API_URL), ("", "", "http://leia-api:8080"))
+        self.assertFalse(tracing_is_enabled())

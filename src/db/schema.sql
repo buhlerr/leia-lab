@@ -179,13 +179,21 @@ CREATE TABLE IF NOT EXISTS analyses (
     started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     finished_at TIMESTAMPTZ
 );
+-- Ciclo de vida: running -> done | unsupported | failed. DROP + ADD vale tambem para bancos criados antes do CHECK.
+ALTER TABLE analyses DROP CONSTRAINT IF EXISTS analyses_status_check;
+ALTER TABLE analyses ADD CONSTRAINT analyses_status_check
+    CHECK (status IN ('running', 'done', 'unsupported', 'failed'));
 
--- So status/minuta_type/report/finished_at mudam; o snapshot e congelado.
+-- So status/minuta_type/report/finished_at mudam, e so enquanto 'running'; o snapshot e congelado.
 CREATE OR REPLACE FUNCTION analyses_guard() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
     IF TG_OP = 'DELETE' THEN
         RAISE EXCEPTION 'DELETE on analyses is not allowed' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    IF OLD.status <> 'running' THEN
+        RAISE EXCEPTION 'analysis % is finished (%): its row is immutable', OLD.id, OLD.status
+            USING ERRCODE = 'insufficient_privilege';
     END IF;
     IF (OLD.id, OLD.filename_alias, OLD.text_sha256, OLD.params, OLD.rules_snapshot, OLD.rules_hash,
         OLD.matrix_version, OLD.prompt_version, OLD.domain_history_id, OLD.started_at)

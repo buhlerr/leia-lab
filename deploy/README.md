@@ -74,5 +74,5 @@ conteúdo mascarado, a mesma política do `--trace` do CLI. A LangSmith fica for
 ## Testes
 
 ```bash
-scripts/ci.sh   # pytest + testes do admin (cria e apaga test_<banco> no servidor do TEST_DATABASE_URL)
+scripts/ci.sh   # pytest + testes do admin (cria e apaga test_<banco> no servidor do TEST_DATABASE_URL) + modelo TLA+ (java)
 ```

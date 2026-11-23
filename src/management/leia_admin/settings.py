@@ -29,6 +29,10 @@ BASE_DIR = Path(__file__).resolve().parents[1]  # src/management/
 
 DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() in ("1", "true", "yes")
 _TESTING = sys.argv[1:2] == ["test"]
+if _TESTING:
+    from tests import _hermetic
+
+    _hermetic.apply()
 
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
 if not SECRET_KEY:

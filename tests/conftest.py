@@ -13,7 +13,10 @@ import asyncpg
 import pytest
 
 from src.config import Settings
+from tests import _hermetic as hermetic
 from tests._db_guard import SuiteSettings, UnsafeTestDatabaseError, assert_safe_test_database
+
+hermetic.apply()
 
 _SUITE_SETTINGS = SuiteSettings()
 TEST_DATABASE_URL = _SUITE_SETTINGS.TEST_DATABASE_URL
