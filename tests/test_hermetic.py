@@ -14,9 +14,12 @@ from src.config import Settings
 REPO = Path(__file__).resolve().parents[1]
 
 # O ambiente de quem roda a suite sob `shelve run`, com os servicos apontando para lugar nenhum.
+# Caixa diferente de proposito: o Linux aceita as duas e o pydantic le o env sem caixa.
 _POISON = {
     "OPENROUTER_API_KEY": "or_real",
+    "openrouter_api_key": "or_real_lower",
     "TYPESAFE_API_KEY": "ts_real",
+    "typesafe_api_key": "ts_real_lower",
     "LEIA_API_TOKEN": "tok_real",
     "MLFLOW_TRACKING_URI": "http://127.0.0.1:9",
     "OPENROUTER_BASE_URL": "http://127.0.0.1:9/or",
@@ -41,6 +44,18 @@ def test_settings_carry_no_external_credential_or_service():
 
 def test_langsmith_tracing_is_off():
     assert not tracing_is_enabled()
+
+
+def test_case_variant_of_a_credential_is_blanked(monkeypatch):
+    """openrouter_api_key minusculo (o Linux aceita) nao sobrevive ao bootstrap:
+    o pydantic le o env sem caixa, entao a variante vale tanto quanto a oficial."""
+    from tests._hermetic import apply
+
+    monkeypatch.setenv("openrouter_api_key", "or_real_lower")
+    monkeypatch.setenv("typesafe_api_key", "ts_real_lower")
+    apply()
+    assert os.environ["openrouter_api_key"] == ""
+    assert os.environ["typesafe_api_key"] == ""
 
 
 def _run_poisoned(*args: str) -> subprocess.CompletedProcess[str]:

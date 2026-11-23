@@ -37,4 +37,11 @@ def hermetic_environment() -> dict[str, str]:
 
 
 def apply() -> None:
-    os.environ.update(hermetic_environment())
+    env = hermetic_environment()
+    # Variantes de caixa (ex.: openrouter_api_key minusculo) sobrevivem a um update no
+    # Linux e o pydantic le o env SEM caixa: sem isto, a suite herda a credencial real.
+    lower = {name.lower(): value for name, value in env.items()}
+    for existing in list(os.environ):
+        if existing not in env and existing.lower() in lower:
+            os.environ[existing] = lower[existing.lower()]
+    os.environ.update(env)
