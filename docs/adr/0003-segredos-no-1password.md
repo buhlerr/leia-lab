@@ -18,6 +18,6 @@ Os segredos de desenvolvimento (chaves pagas do OpenRouter e da TypeSafe, LangSm
 ## Consequências
 
 - Uma conta de serviço do 1Password não tem as permissões alteradas depois de criada. Escrever no cofre exige uma conta temporária, revogada depois do uso.
-- A conta de serviço lê o cofre `DEV` inteiro, que também guarda credenciais de outros projetos. Um cofre dedicado (`leia-lab`) reduziria o que um agente desta VPS pode ler.
+- A conta de serviço lê o cofre `DEV` inteiro. O responsável decidiu não criar um cofre só do leia-lab: o `DEV` já é o cofre exclusivo dos acessos dos seus projetos de desenvolvimento.
 - Os `.env` de produção no CT 116 continuam fora do 1Password. Trazê-los exige um deploy.
-- O `shelve.json` e o bloco do Shelve no `.gitignore` continuam no repositório até o responsável confirmar o `op` no Windows e autorizar a remoção. O bloco também carrega as regras `.env` / `.env.*`, que precisam ficar.
+- O Shelve saiu do repositório (`shelve.json` e o bloco do `.gitignore`), por autorização do responsável ("remova o shelve", 2026-11-23). As regras `.env` / `.env.*` do bloco foram mantidas.

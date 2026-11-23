@@ -21,15 +21,11 @@ __pycache__/
 # Minutas e base normativa locais: NUNCA versionar (leia-lab-ni7; lidas por LEIA_MINUTAS_DIR)
 leia-minutas-teste-mascaradas/
 leia-kb-legislacao/
-# shelve-managed-block
+# Segredos: nenhum .env com valores no git. O .env.op so tem referencias op:// (ADR-0003)
 .env
 .env.*
 !.env.template
 !.env.example
-.shelve/
-# end shelve-managed-block
-
-# Referencias op:// do 1Password, sem valores (ADR-0003)
 !.env.op
 
 # Dependencias geradas
