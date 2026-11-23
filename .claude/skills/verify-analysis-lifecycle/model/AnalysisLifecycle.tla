@@ -25,6 +25,12 @@
 (*              (DeferCancel = TRUE): analyze() only ends after the row     *)
 (*              is failed. Without the deferral the outer await raises      *)
 (*              first, and the row stays 'running' with an orphan write.    *)
+(*              The run carries an idempotency key. `other` is the row     *)
+(*              another analyze() call wrote with the same key, before or  *)
+(*              while this one runs; the unique key makes this run's INSERT *)
+(*              write nothing and raise AnalysisKeyTaken.                   *)
+(*              `paid` records whether this run reached an external call   *)
+(*              (Jev, LLM, search): the work a retry must not pay twice.   *)
 (*   "fixed_*"  the fixed design with one safeguard removed, to show that  *)
 (*              each property can fail.                                    *)
 (* Assumption: the failure UPDATE reaches Postgres (the DB is up). A dead  *)
@@ -36,7 +42,7 @@ EXTENDS Naturals, Sequences
 CONSTANT Design, DeferCancel
 
 Designs == {"current", "fixed", "fixed_catches_exception_only", "fixed_split_iniciar",
-            "fixed_unguarded_failure"}
+            "fixed_unguarded_failure", "fixed_no_unique_key", "fixed_conflict_not_raised"}
 ASSUME Design \in Designs
 ASSUME DeferCancel \in BOOLEAN
 
@@ -47,6 +53,7 @@ DbWrites == {"insert", "insert_iniciar", "trail", "finish"}
 \* One await point. node = "" means outside every graph node (analyze() or LangGraph's loop).
 Ins(k, node, what) == [k |-> k, node |-> node, what |-> what]
 Ext(node, what) == Ins("ext", node, what)     \* await with no DB effect
+Paid(node) == Ins("paid", node, node \o ": Jev/LLM/search")   \* external call that costs money
 Sync(node, what) == Ins("sync", node, what)   \* plain code: can raise, cannot be cancelled
 Rec(node) == Ins("trail", node, node \o ": append_trail")
 Between == Ext("", "LangGraph between nodes")
@@ -70,7 +77,7 @@ Iniciar ==
                Ins("insert_iniciar", "iniciar", "start_analysis: INSERT + iniciar trail (one transaction)"),
                Sync("iniciar", "tag_analysis") >>
 
-Node(n) == << Between, Ext(n, n \o ": Jev/LLM/search"), Rec(n) >>
+Node(n) == << Between, Paid(n), Rec(n) >>
 Supported == Node("ficha") \o Node("triar") \o Node("buscar") \o Node("analisar")
 Validar == << Between, Sync("validar", "validate_and_format"), Rec("validar"),
               Ins("finish", "validar", "finish_analysis") >>
@@ -88,9 +95,11 @@ VARIABLES pc,      \* index of the next await point in P
           path,    \* classificar's verdict: supported minuta or not
           result,  \* how analyze() ended: "returned" or "raised"
           event,   \* what the last step did, for reading a counterexample
-          write    \* the failure write in the handler: not begun / pending / settled
+          write,   \* the failure write in the handler: not begun / pending / settled
+          other,   \* the row another analyze() call holds with the same idempotency key
+          paid     \* this run reached an external call
 
-vars == <<pc, phase, row, trail, owned, path, result, event, write>>
+vars == <<pc, phase, row, trail, owned, path, result, event, write, other, paid>>
 
 P == Program(path)
 
@@ -101,6 +110,13 @@ FinishStatus == IF path = "suportado" THEN "done" ELSE "unsupported"
 GuardedFailure == Design \notin {"current", "fixed_unguarded_failure"}
 \* analyses_guard rejects any UPDATE of a finished row.
 TriggerFreezesTerminal == Design \notin {"current", "fixed_unguarded_failure"}
+\* The code before the key existed has no idempotency key at all: no other row shares one.
+Keyed == Design # "current"
+\* UNIQUE (idempotency_key): INSERT ... ON CONFLICT DO NOTHING writes nothing once another row holds the key.
+UniqueKey == Design # "fixed_no_unique_key"
+KeyTaken == UniqueKey /\ other # "absent"
+\* start_analysis raises AnalysisKeyTaken when ON CONFLICT DO NOTHING RETURNING id gives no row.
+RaisesOnConflict == Design # "fixed_conflict_not_raised"
 
 Catches(ins, e) ==
     IF Design = "current"
@@ -109,11 +125,15 @@ Catches(ins, e) ==
 
 Faults(k) == CASE k = "own" -> {} [] k = "sync" -> {"error"} [] OTHER -> {"error", "cancel"}
 
+Inserts == {"insert", "insert_iniciar"}
+
 Apply(ins) ==
-    /\ row' = CASE ins.k \in {"insert", "insert_iniciar"} -> "running"
+    /\ row' = CASE ins.k \in Inserts /\ KeyTaken -> row
+                [] ins.k \in Inserts -> "running"
                 [] ins.k = "finish" -> FinishStatus
                 [] OTHER -> row
-    /\ trail' = CASE ins.k = "trail" -> Append(trail, ins.node)
+    /\ trail' = CASE ins.k = "insert_iniciar" /\ KeyTaken -> trail
+                  [] ins.k = "trail" -> Append(trail, ins.node)
                   [] ins.k = "insert_iniciar" -> << "iniciar" >>
                   [] OTHER -> trail
 
@@ -126,6 +146,8 @@ TypeOK ==
     /\ path \in {"suportado", "nao_suportado"}
     /\ result \in {"running", "returned", "raised"}
     /\ write \in {"none", "pending", "done"}
+    /\ other \in {"absent", "running"}
+    /\ paid \in BOOLEAN
 
 Init ==
     /\ pc = 1
@@ -137,17 +159,21 @@ Init ==
     /\ result = "running"
     /\ event = "start"
     /\ write = "none"
+    /\ other = "absent"
+    /\ paid = FALSE
 
 Proceed ==
     /\ phase = "run"
     /\ LET ins == P[pc] IN
+        /\ ~(ins.k \in Inserts /\ KeyTaken /\ RaisesOnConflict)   \* see KeyConflict
         /\ IF ins.k \in DbWrites THEN Apply(ins) ELSE UNCHANGED <<row, trail>>
+        /\ paid' = (paid \/ ins.k = "paid")
         /\ owned' = (owned \/ ins.k = "own")
         /\ pc' = IF pc = Len(P) THEN pc ELSE pc + 1
         /\ phase' = IF pc = Len(P) THEN "end" ELSE "run"
         /\ result' = IF pc = Len(P) THEN "returned" ELSE result
         /\ event' = ins.what \o ": ok"
-        /\ UNCHANGED <<path, write>>
+        /\ UNCHANGED <<path, write, other>>
 
 Fault ==
     /\ phase = "run"
@@ -159,25 +185,36 @@ Fault ==
             /\ event' = ins.what \o (IF committed THEN ": committed, then " ELSE ": ")
                         \o (IF e = "error" THEN "raised" ELSE "cancelled")
                         \o (IF Catches(ins, e) THEN " (caught)" ELSE " (not caught)")
-            /\ UNCHANGED <<pc, owned, path, write>>
+            /\ paid' = (paid \/ ins.k = "paid")   \* a call that raised was still sent
+            /\ UNCHANGED <<pc, owned, path, write, other>>
+
+KeyConflict ==
+    \* ON CONFLICT DO NOTHING RETURNING id gives no row: start_analysis writes nothing and raises AnalysisKeyTaken.
+    /\ phase = "run"
+    /\ LET ins == P[pc] IN
+        /\ ins.k \in Inserts /\ KeyTaken /\ RaisesOnConflict
+        /\ phase' = IF Catches(ins, "error") THEN "handler" ELSE "end"
+        /\ result' = "raised"
+        /\ event' = ins.what \o ": key taken, nothing written, AnalysisKeyTaken raised"
+        /\ UNCHANGED <<pc, row, trail, owned, path, write, other, paid>>
 
 MarkFailed ==
     /\ phase = "handler" /\ write = "none"
     /\ write' = "pending"
     /\ event' = "failure write: begins"
-    /\ UNCHANGED <<pc, phase, row, trail, owned, path, result>>
+    /\ UNCHANGED <<pc, phase, row, trail, owned, path, result, other, paid>>
 
 SecondCancel ==
     \* A 2nd cancellation lands while the shielded failure write is pending.
     /\ phase = "handler" /\ write = "pending"
     /\ IF DeferCancel
        THEN /\ event' = "2nd cancel during the failure write (deferred)"
-            /\ UNCHANGED <<pc, phase, row, trail, owned, path, result, write>>
+            /\ UNCHANGED <<pc, phase, row, trail, owned, path, result, write, other, paid>>
        ELSE /\ phase' = "end"          \* the outer await raised before the write settled;
             /\ write' = "pending"      \* the row is left as it is, the write runs orphaned
             /\ result' = "raised"
             /\ event' = "2nd cancel during the failure write: analyze() ended first"
-            /\ UNCHANGED <<pc, row, trail, owned, path>>
+            /\ UNCHANGED <<pc, row, trail, owned, path, other, paid>>
 
 WriteSettles ==
     \* The shielded UPDATE commits, is a no-op, or the trigger rejects it.
@@ -189,11 +226,20 @@ WriteSettles ==
     /\ write' = "done"
     /\ phase' = "end"
     /\ event' = "failure write: status " \o row'
-    /\ UNCHANGED <<pc, trail, owned, path, result>>
+    /\ UNCHANGED <<pc, trail, owned, path, result, other, paid>>
+
+OtherRunInserts ==
+    \* A retry or a concurrent POST with the same key inserts its row, at any moment. Its own lifecycle
+    \* is that run's, not modeled here. With the unique key it cannot insert once this run's row exists.
+    /\ Keyed /\ other = "absent"
+    /\ ~(UniqueKey /\ row # "none")
+    /\ other' = "running"
+    /\ event' = "another call with the same key inserts its row"
+    /\ UNCHANGED <<pc, phase, row, trail, owned, path, result, write, paid>>
 
 Finished == phase = "end" /\ UNCHANGED vars
 
-Next == Proceed \/ Fault \/ MarkFailed \/ SecondCancel \/ WriteSettles \/ Finished
+Next == Proceed \/ Fault \/ KeyConflict \/ MarkFailed \/ SecondCancel \/ WriteSettles \/ OtherRunInserts \/ Finished
 
 Spec == Init /\ [][Next]_vars
 
@@ -208,6 +254,13 @@ TrailStartsWithIniciar == row \in Terminal => Len(trail) > 0 /\ Head(trail) = "i
 
 \* analyze() returns normally only after the row reached done or unsupported.
 ReturnedMeansFinished == result = "returned" => row \in {"done", "unsupported"}
+
+\* One idempotency key names at most one analyses row: a retry never duplicates the row, its trail or its paid calls.
+OneRowPerKey == ~(row # "none" /\ other # "absent")
+
+\* A run without its own row (the key was taken, or the INSERT never committed) wrote no trail and
+\* made no external call: AnalysisKeyTaken is raised before any paid work.
+NoWorkWithoutRow == row = "none" => (trail = << >> /\ ~paid)
 
 \* A finished status never changes.
 TerminalNeverChanges == [][(row \in Terminal) => (row' = row)]_row

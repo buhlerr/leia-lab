@@ -4,8 +4,11 @@ Autenticacao servico-a-servico por bearer ``LEIA_API_TOKEN``, separada dos
 logins do Django Admin; sem token configurado o app recusa subir (fail
 closed). Rotas:
 
-* ``POST /v1/analyses``: multipart campo ``file`` (.pdf/.docx/.txt), sincrono;
-  devolve 201 com o resultado completo (report + trilha).
+* ``POST /v1/analyses``: multipart campo ``file`` (.pdf/.docx/.txt) e header obrigatorio
+  ``Idempotency-Key``, sincrono; devolve 201 com o resultado completo (report + trilha). A mesma
+  chave com a mesma entrada nunca roda de novo: 200 com a analise terminada, ou 409 com o
+  ``analysis_id`` se ela ainda roda (``analysis_in_progress``) ou falhou (``analysis_failed``);
+  com outra entrada, 409 ``idempotency_key_reused``.
 * ``GET  /v1/analyses/{analysis_id}``: o mesmo contrato de um POST anterior.
 * ``GET  /healthz``: sem autenticacao.
 
@@ -26,13 +29,14 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
 import asyncpg
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from src.api.schemas import AnalysisResult
-from src.api.service import evaluate_upload, load_analysis
+from src.api.service import AnalysisNotReplayable, evaluate_upload, load_analysis
 from src.config import Settings
+from src.db.analyses import AnalysisKeyTaken
 from src.graphs.analyze_minuta_graph import build_analyze_minuta_graph
 from src.ingest.extract import MAX_UPLOAD_BYTES, DocumentError
 from src.tracing import mlflow_configured, mlflow_request, use_short_mlflow_http
@@ -40,6 +44,20 @@ from src.tracing import mlflow_configured, mlflow_request, use_short_mlflow_http
 _log = logging.getLogger(__name__)
 
 _401_BODY = {"code": "unauthorized", "message": "Token de servico ausente ou invalido."}
+_409_KEY_REUSED = {
+    "code": "idempotency_key_reused",
+    "message": "Esta Idempotency-Key ja foi usada para outro documento.",
+}
+_409_NOT_REPLAYABLE = {
+    "running": (
+        "analysis_in_progress",
+        "A analise desta Idempotency-Key ainda esta em curso; consulte GET /v1/analyses/{analysis_id}.",
+    ),
+    "failed": (
+        "analysis_failed",
+        "A analise desta Idempotency-Key falhou; envie de novo com uma Idempotency-Key nova.",
+    ),
+}
 _DISCONNECT_POLL = 0.5  # s entre sondas de desconexao
 
 
@@ -139,24 +157,59 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # O corpo nunca ecoa o documento nem o nome real do arquivo: so o contrato da classe.
         return JSONResponse(status_code=exc.http_status, content={"code": exc.code, "message": exc.public_message})
 
+    @app.exception_handler(AnalysisKeyTaken)
+    async def _key_reused(request: Request, exc: AnalysisKeyTaken) -> JSONResponse:
+        return JSONResponse(status_code=409, content=_409_KEY_REUSED)
+
+    @app.exception_handler(AnalysisNotReplayable)
+    async def _not_replayable(request: Request, exc: AnalysisNotReplayable) -> JSONResponse:
+        code, message = _409_NOT_REPLAYABLE[exc.status]
+        return JSONResponse(
+            status_code=409, content={"code": code, "message": message, "analysis_id": str(exc.analysis_id)}
+        )
+
     @app.post(
         "/v1/analyses",
         status_code=201,
         response_model=AnalysisResult,
         summary="Avalia um contrato enviado como arquivo",
         dependencies=[require_token],
+        responses={
+            200: {"description": "Retry: a analise terminada desta chave"},
+            409: {
+                "description": "Chave ja usada para outro documento (idempotency_key_reused), ou a analise "
+                "dela ainda roda (analysis_in_progress) ou falhou (analysis_failed); as duas ultimas "
+                "trazem analysis_id"
+            },
+        },
     )
     async def create_analysis(
         file: Annotated[UploadFile, File(description="Contrato (.pdf, .docx ou .txt)")],
+        idempotency_key: Annotated[
+            str,
+            Header(
+                alias="Idempotency-Key",
+                min_length=1,
+                max_length=255,
+                description="Uma por documento enviado; repeti-la no retry devolve a mesma analise",
+            ),
+        ],
         request: Request,
+        response: Response,
     ) -> AnalysisResult:
         # Le no maximo um byte alem do teto: o nucleo recusa sem carregar o resto.
         data = await file.read(MAX_UPLOAD_BYTES + 1)
         # Traco MLflow so quando ele subiu junto; o nucleo (service.py) segue sem rastreio.
         with mlflow_request() if app.state.mlflow_on else contextlib.nullcontext():
             try:
-                return await run_disconnect_guarded(
-                    evaluate_upload(app.state.pool, app.state.graph, filename=file.filename or "", data=data),
+                result, created = await run_disconnect_guarded(
+                    evaluate_upload(
+                        app.state.pool,
+                        app.state.graph,
+                        filename=file.filename or "",
+                        data=data,
+                        idempotency_key=idempotency_key,
+                    ),
                     request,
                 )
             except ClientDisconnected:
@@ -164,6 +217,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     status_code=499,
                     detail={"code": "client_disconnected", "message": "Cliente desconectou durante a analise."},
                 ) from None
+        if not created:
+            response.status_code = 200
+        return result
 
     @app.get(
         "/v1/analyses/{analysis_id}",

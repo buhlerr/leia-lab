@@ -63,8 +63,9 @@ def api_settings() -> Settings:
     )
 
 
-def _auth() -> dict[str, str]:
-    return {"Authorization": f"Bearer {TOKEN}"}
+def _auth(idempotency_key: str | None = None) -> dict[str, str]:
+    """Bearer de servico + ``Idempotency-Key`` (uma chave nova por chamada, salvo se dada)."""
+    return {"Authorization": f"Bearer {TOKEN}", "Idempotency-Key": idempotency_key or str(uuid.uuid4())}
 
 
 @asynccontextmanager
@@ -251,6 +252,130 @@ async def test_get_unknown_uuid_returns_404_and_bad_uuid_returns_422(pool, api_s
 
         r = await client.get("/v1/analyses/nao-e-um-uuid", headers=_auth())
         assert r.status_code == 422
+
+
+# ---------------------------------------------------------------- idempotencia do POST
+
+
+class _JevCounter:
+    """Conta as chamadas externas (Jev) da analise: a chamada paga que um retry nao pode repetir."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from src.graphs import analyze_minuta_graph
+
+        self.calls = 0
+        real = analyze_minuta_graph.call_jev
+
+        async def counting(*args: object, **kwargs: object) -> object:
+            self.calls += 1
+            return await real(*args, **kwargs)
+
+        monkeypatch.setattr(analyze_minuta_graph, "call_jev", counting)
+
+
+async def _count_analyses(pool) -> int:
+    return await pool.fetchval("SELECT count(*) FROM analyses")
+
+
+def _txt(text: str = _MINUTA, name: str = "retry.txt") -> dict[str, tuple[str, bytes, str]]:
+    return {"file": (name, text.encode("utf-8"), "text/plain")}
+
+
+async def test_post_without_idempotency_key_returns_422(pool, api_settings) -> None:
+    await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
+    async with api_client(api_settings) as client:
+        r = await client.post("/v1/analyses", files=_txt(), headers={"Authorization": f"Bearer {TOKEN}"})
+    assert await _count_analyses(pool) == 0
+    assert r.status_code == 422
+
+
+async def test_retry_with_the_same_key_returns_the_first_analysis_without_running_again(
+    pool, api_settings, monkeypatch
+) -> None:
+    await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
+    jev = _JevCounter(monkeypatch)
+    key = str(uuid.uuid4())
+    async with api_client(api_settings) as client:
+        first = await client.post("/v1/analyses", files=_txt(), headers=_auth(key))
+        assert first.status_code == 201, first.text
+        paid_calls = jev.calls
+        retry = await client.post("/v1/analyses", files=_txt(), headers=_auth(key))
+    assert (await _count_analyses(pool), jev.calls) == (1, paid_calls)
+    assert retry.status_code == 200
+    assert retry.json() == first.json()
+
+
+async def test_same_key_with_a_different_document_returns_409(pool, api_settings) -> None:
+    await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
+    key = str(uuid.uuid4())
+    async with api_client(api_settings) as client:
+        first = await client.post("/v1/analyses", files=_txt(), headers=_auth(key))
+        assert first.status_code == 201, first.text
+        other = await client.post("/v1/analyses", files=_txt(_MINUTA + "\nCláusula 3ª - Do Foro."), headers=_auth(key))
+    assert await _count_analyses(pool) == 1
+    assert other.status_code == 409
+    assert other.json()["code"] == "idempotency_key_reused"
+
+
+async def test_retry_while_the_first_run_is_running_returns_409_in_progress(pool, api_settings, monkeypatch) -> None:
+    """Dois POST simultaneos com a mesma chave passam juntos de toda checagem previa e disputam o INSERT.
+
+    So um grava; o outro responde 409 ``analysis_in_progress`` com o id, enquanto o primeiro ainda roda.
+    """
+    from src.graphs import analyze_minuta_graph
+
+    await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
+    both_read_rules = asyncio.Barrier(2)
+    loser_answered = asyncio.Event()
+    real_load = analyze_minuta_graph.load_rules_snapshot
+    real_jev = analyze_minuta_graph.call_jev
+
+    async def load_then_wait(p):
+        snap = await real_load(p)
+        await asyncio.wait_for(both_read_rules.wait(), 10)
+        return snap
+
+    async def jev_after_loser(*args, **kwargs):
+        await asyncio.wait_for(loser_answered.wait(), 10)
+        return await real_jev(*args, **kwargs)
+
+    monkeypatch.setattr(analyze_minuta_graph, "load_rules_snapshot", load_then_wait)
+    monkeypatch.setattr(analyze_minuta_graph, "call_jev", jev_after_loser)
+    key = str(uuid.uuid4())
+    async with api_client(api_settings) as client:
+        posts = {asyncio.ensure_future(client.post("/v1/analyses", files=_txt(), headers=_auth(key))) for _ in range(2)}
+        done, running = await asyncio.wait(posts, return_when=asyncio.FIRST_COMPLETED)
+        loser = done.pop().result()
+        loser_answered.set()
+        winner = await running.pop()
+    assert await _count_analyses(pool) == 1
+    assert await pool.fetchval("SELECT count(*) FROM analysis_trail WHERE step = 'iniciar'") == 1
+    assert (winner.status_code, loser.status_code) == (201, 409), loser.text
+    assert loser.json()["code"] == "analysis_in_progress"
+    assert loser.json()["analysis_id"] == winner.json()["analysis_id"]
+
+
+async def test_retry_of_a_failed_analysis_returns_409_and_asks_for_a_new_key(pool, api_settings, monkeypatch) -> None:
+    from src.graphs import analyze_minuta_graph
+
+    await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
+
+    async def jev_down(*args, **kwargs):
+        raise RuntimeError("Jev fora do ar")
+
+    monkeypatch.setattr(analyze_minuta_graph, "call_jev", jev_down)
+    key = str(uuid.uuid4())
+    async with api_client(api_settings) as client:
+        with pytest.raises(RuntimeError, match="Jev fora do ar"):  # a 1a tentativa vira 500
+            await client.post("/v1/analyses", files=_txt(), headers=_auth(key))
+        failed_id = await pool.fetchval("SELECT id FROM analyses WHERE status = 'failed'")
+        monkeypatch.undo()
+        retry = await client.post("/v1/analyses", files=_txt(), headers=_auth(key))
+    assert await _count_analyses(pool) == 1
+    assert retry.status_code == 409, retry.text
+    assert retry.json()["code"] == "analysis_failed"
+    assert retry.json()["analysis_id"] == str(failed_id)
+    assert "nova" in retry.json()["message"]
 
 
 # ---------------------------------------------------------------- rastreio MLflow da API

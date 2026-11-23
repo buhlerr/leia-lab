@@ -8,7 +8,7 @@ from urllib.parse import urlsplit, urlunsplit
 import asyncpg
 import pytest
 
-from src.db.connection import init_db
+from src.db.connection import init_db, read_schema_sql
 from tests.conftest import TEST_DATABASE_URL
 
 DOMAIN_TABLES = ["minuta_types", "themes", "risk_matrix", "prompts"]
@@ -212,6 +212,35 @@ async def test_init_normalizes_a_legacy_status_outside_the_lifecycle(dpool):
     fresh = await _insert_analysis(dpool)  # linha running: o gatilho deixa passar, o CHECK nao
     with pytest.raises(asyncpg.CheckViolationError):  # e o CHECK voltou a valer
         await dpool.execute("UPDATE analyses SET status = 'finished' WHERE id = $1::uuid", fresh)
+
+
+async def test_init_adds_the_idempotency_key_to_a_database_with_analyses(dpool):
+    """Banco anterior a chave, com analises: init a cria vazia, unica, e o reinit nao muda nada."""
+    await dpool.execute("DROP INDEX analyses_idempotency_key; ALTER TABLE analyses DROP COLUMN idempotency_key")
+    old = await _insert_analysis(dpool)
+    await init_db(dpool)
+    await init_db(dpool)
+    assert await dpool.fetchval("SELECT count(*) FROM analyses WHERE idempotency_key IS NULL") == 1
+    await _insert_analysis(dpool)  # linhas sem chave (CLI) nao colidem entre si
+    with pytest.raises(asyncpg.InsufficientPrivilegeError, match="immutable"):
+        await dpool.execute("UPDATE analyses SET idempotency_key = 'k' WHERE id = $1::uuid", old)
+    keyed = (
+        "INSERT INTO analyses (filename_alias, text_sha256, rules_snapshot, rules_hash, matrix_version, "
+        "prompt_version, domain_history_id, idempotency_key) "
+        "VALUES ('documento-2.txt', 'h', '{}'::jsonb, 'rh', 'mv', 'pv', 0, 'k')"
+    )
+    await dpool.execute(keyed)
+    with pytest.raises(asyncpg.UniqueViolationError):
+        await dpool.execute(keyed)
+
+
+async def test_reinit_does_not_lock_analyses_against_readers(dpool):
+    """O init roda com a API no ar: nao pode pedir ACCESS EXCLUSIVE em analyses a cada vez."""
+    async with dpool.acquire() as reader, reader.transaction():
+        await reader.execute("SELECT 1 FROM analyses LIMIT 1")  # leitura em curso (ACCESS SHARE)
+        async with dpool.acquire() as admin:
+            await admin.execute("SET lock_timeout = '2s'")
+            await admin.execute(read_schema_sql())
 
 
 # ---------------------------------------------------------------- papeis

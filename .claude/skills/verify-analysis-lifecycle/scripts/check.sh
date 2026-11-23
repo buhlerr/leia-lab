@@ -55,6 +55,8 @@ checks=(
     "fixed_split_iniciar:TrailStartsWithIniciar"
     "fixed_unguarded_failure:TerminalNeverChanges"
     "fixed_no_defer:NoRunEndsRunning"
+    "fixed_no_unique_key:OneRowPerKey"
+    "fixed_conflict_not_raised:NoWorkWithoutRow"
 )
 bad=0
 for c in "${checks[@]}"; do

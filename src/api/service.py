@@ -17,6 +17,7 @@ from typing import Any
 
 import asyncpg
 
+from src.db.analyses import AnalysisKeyTaken
 from src.graphs.analyze_minuta_graph import analyze
 from src.ingest.extract import (
     MAX_UPLOAD_BYTES,
@@ -29,6 +30,18 @@ from src.ingest.isolated import extract_text_isolated
 
 # Extensoes que podem ser patologicas: extracao em processo separado.
 _ISOLATED_EXTENSIONS = frozenset({".pdf", ".docx"})
+
+# Status com resultado pronto: so estes o retry devolve.
+_REPLAYABLE = frozenset({"done", "unsupported"})
+
+
+class AnalysisNotReplayable(Exception):
+    """A chave ja nomeia uma analise sem resultado para devolver: ``status`` e 'running' ou 'failed'."""
+
+    def __init__(self, analysis_id: uuid.UUID, status: str) -> None:
+        super().__init__(f"{analysis_id} is {status}")
+        self.analysis_id = analysis_id
+        self.status = status
 
 
 def _decode(value: Any) -> Any:
@@ -55,21 +68,32 @@ async def _extract_text(filename: str, data: bytes) -> str:
 
 
 async def evaluate_upload(
-    pool: asyncpg.Pool, graph: Any, *, filename: str, data: bytes
-) -> dict[str, Any]:
-    """Avalia um contrato enviado como bytes e devolve o resultado com a trilha.
+    pool: asyncpg.Pool, graph: Any, *, filename: str, data: bytes, idempotency_key: str
+) -> tuple[dict[str, Any], bool]:
+    """Avalia um contrato enviado como bytes; devolve o resultado com a trilha e se ele foi criado agora.
 
-    POST e GET devolvem o mesmo contrato: aqui a analise roda e o resultado e
-    re-lido do banco (``load_analysis``), exatamente como o GET fara depois.
+    POST e GET devolvem o mesmo contrato: o resultado e re-lido do banco (``load_analysis``),
+    exatamente como o GET fara depois. Chave ja usada para a mesma entrada devolve a analise
+    terminada dela sem rodar de novo, ou levanta ``AnalysisNotReplayable`` se ela ainda roda ou
+    falhou; para outra entrada, ``AnalysisKeyTaken`` sobe.
     """
     text = await _extract_text(filename, data)
     if not text.strip():
         raise EmptyDocumentError("The document has no text")
-    state = await analyze(graph, raw_text=text, filename=filename)
-    result = await load_analysis(pool, state["analysis_id"])
-    if result is None:  # o proprio grafo acabou de gravar a analise
+    try:
+        state = await analyze(graph, raw_text=text, filename=filename, idempotency_key=idempotency_key)
+    except AnalysisKeyTaken as taken:
+        if not taken.same_input:
+            raise
+        analysis_id, created = taken.analysis_id, False
+    else:
+        analysis_id, created = state["analysis_id"], True
+    result = await load_analysis(pool, analysis_id)
+    if result is None:  # a linha existe: a execucao ou a chave acabaram de apontar para ela
         raise RuntimeError("analysis row not found after a completed run")  # pragma: no cover
-    return result
+    if not created and result["status"] not in _REPLAYABLE:
+        raise AnalysisNotReplayable(analysis_id, result["status"])
+    return result, created
 
 
 async def load_analysis(pool: asyncpg.Pool, analysis_id: uuid.UUID | str) -> dict[str, Any] | None:

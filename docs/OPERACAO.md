@@ -54,6 +54,16 @@ git archive --format=tar.gz -o leia-api-<sha>.tar.gz <sha> pyproject.toml uv.loc
 docker compose build api && docker compose up -d --no-deps api
 ```
 
+Commit que muda o `src/db/schema.sql` ou o contrato entre admin e API (ex.: o `Idempotency-Key`
+obrigatório do VIT-8) não segue o roteiro acima sozinho. Nessa ordem:
+
+1. Rode `python -m src.cli init` com o `DATABASE_URL` do **dono** das tabelas (`leia`), do código do
+   commit novo. O `api_login` e o `django_login` não são donos e não alteram tabela; sem isso a API
+   nova falha no INSERT (coluna `idempotency_key` ausente). O init é idempotente e pode rodar com a
+   API antiga no ar.
+2. Atualize a API **e** o admin para o mesmo commit e suba os dois juntos. O admin antigo não manda o
+   header, e a API nova responde 422 a toda "Nova análise" dele.
+
 ## Segredos (1Password)
 
 Os segredos de desenvolvimento ficam no 1Password, cofre `DEV`, itens com a tag `leia-lab` (ADR-0003).
