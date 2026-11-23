@@ -93,19 +93,36 @@ _Q = (
     r"(?i:brasileir[oa]|portugues[a]?|argentin[oa]|uruguai[oa]|estrangeir[oa]|naturalizad[oa]"
     r"|solteir[oa]|casad[oa]|divorciad[oa]|vi[úu]v[oa]|separad[oa]|maior\s+e\s+capaz)"
 )
-_R = (
-    r"(?i:nome(?:\s+completo)?|locador[a]?|locat[áa]ri[oa]|fiador[a]?|c[ôo]njuge"
-    r"|testemunha(?:\s*\d)?|propriet[áa]ri[oa]|inquilin[oa]|representante(?:\s+legal)?"
-    r"|respons[áa]vel|assinante)"
+_PARTY_LABELS = (
+    r"nome(?:\s+completo)?",
+    r"locador[a]?",
+    r"locat[áa]ri[oa]",
+    r"inquilin[oa]",
+    r"propriet[áa]ri[oa]",
+    r"fiador[a]?",
+    r"c[ôo]njuge",
+    r"contratante",
+    r"contratad[oa]",
+    r"outorgante",
+    r"outorgad[oa]",
+    r"interveniente",
+    r"anuente",
+    r"procurador[a]?",
+    r"representante(?:\s+legal)?",
+    r"respons[áa]vel",
+    r"assinante",
+    r"testemunha(?:\s*\d)?",
 )
+_PARTY_LABEL = rf"(?i:(?:{'|'.join(_PARTY_LABELS)})(?:e?s|\((?:a|o|as|os|es)\))?)"
+_LEADING_LABELS = re.compile(rf"^(?:{_PARTY_LABEL}\s+(?i:(?:e|ou)\s+)?)+")
 _NAME_RULES = [
     re.compile(rf"({_NC})(?=\s*,\s*{_Q})"),
-    re.compile(rf"{_R}\s*:\s*({_NC})"),
+    re.compile(rf"{_PARTY_LABEL}\s*:\s*({_NC})"),
     re.compile(rf"(?i:\bSr[a]?\.|\bSenhor[a]?)\s+({_NC})"),
     re.compile(rf"({_NC})\s*,?\s*(?i:inscrit[oa]\s+no\s+|portador[a]?\s+do\s+)?C\.?P\.?F\b"),
 ]
 _IGNORE = re.compile(
-    r"(?i)^(contrato|cl[áa]usula|locador|locat[áa]ri|fiador|parte|partes|pessoa"
+    r"(?i)^(contrato|cl[áa]usula|parte|partes|pessoa"
     r"|imobili[áa]ria|administradora|empresa|ltda|s\.?a\.?)\b"
 )
 _RULES = [
@@ -130,8 +147,8 @@ def mask_personal_data(text: str) -> MaskedText:
     nomes: set[str] = set()
     for regra in _NAME_RULES:
         for m in regra.finditer(text):
-            nome = m.group(1).strip()
-            if not _IGNORE.match(nome):
+            nome = _LEADING_LABELS.sub("", m.group(1).strip())
+            if len(nome.split()) > 1 and not _IGNORE.match(nome):
                 nomes.add(nome)
     for nome in sorted(nomes, key=len, reverse=True):
         padrao = r"\s+".join(re.escape(p) for p in nome.split())
