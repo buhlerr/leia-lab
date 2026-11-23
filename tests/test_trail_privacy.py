@@ -15,6 +15,7 @@ from src.db.connection import init_db
 from src.db.defaults import LOCACAO_RESIDENCIAL as LOCACAO
 from src.db.rules import verify_snapshot
 from src.db.seed import seed_defaults
+from src.db.analyses import append_trail, finish_analysis
 from src.graphs.analyze_minuta_graph import AnalyzeMinutaState, analyze, analyze_stream, build_analyze_minuta_graph
 from src.ingest import masking
 
@@ -286,3 +287,54 @@ async def test_a_stream_consumer_that_stops_early_closes_the_row(seeded, setting
     row, steps = await _only_analysis(seeded)
     assert (row["status"], row["report"], steps) == ("failed", {"error": "GeneratorExit"}, ["iniciar"])
     assert row["finished_at"] is not None
+
+
+# ---------------------------------------------------------------- a escrita ao banco e fail-safe
+
+
+async def test_a_trail_step_that_carries_raw_text_is_masked_at_the_write(seeded):
+    """Revisao do PR #42 (achado proprio): um passo malcomportado que monte texto cru
+    nao chega cru ao analysis_trail -- a escrita mascara na fronteira do banco."""
+    aid = str(uuid.uuid4())
+    await seeded.execute(
+        "INSERT INTO analyses (id, filename_alias, text_sha256, rules_snapshot, rules_hash, matrix_version, "
+        "prompt_version, domain_history_id) VALUES ($1::uuid, 'documento-x.txt', 'h', '{}'::jsonb, 'rh', 'mv', 'pv', 0)",
+        aid,
+    )
+    await append_trail(
+        seeded,
+        aid,
+        {"matrix_version": "v", "prompt_version": "p"},
+        [
+            {
+                "step": "triar",
+                "clause_n": 1,
+                "input_summary": {"excerpt": f"LOCADOR: {NAME}, CPF {CPF}."},
+                "decision": {"observacao": f"e-mail {EMAIL} citado no corpo"},
+            }
+        ],
+    )
+    written = await seeded.fetchrow("SELECT input_summary::text AS i, decision::text AS d FROM analysis_trail")
+    blob = written["i"] + written["d"]
+    assert [s for s in (NAME, CPF, EMAIL, "99988877766") if s in blob] == []  # nada cru no banco
+    assert "[CPF]" in blob and "[EMAIL]" in blob
+
+
+async def test_a_report_that_carries_raw_text_is_masked_at_the_write(seeded):
+    """O mesmo fail-safe vale para o relatorio gravado em analyses."""
+    aid = str(uuid.uuid4())
+    await seeded.execute(
+        "INSERT INTO analyses (id, filename_alias, text_sha256, rules_snapshot, rules_hash, matrix_version, "
+        "prompt_version, domain_history_id) VALUES ($1::uuid, 'documento-x.txt', 'h', '{}'::jsonb, 'rh', 'mv', 'pv', 0)",
+        aid,
+    )
+    await finish_analysis(
+        seeded,
+        aid,
+        status="done",
+        minuta_type=None,
+        report={"content": {"alerts": [{"trecho": f"LOCADOR: {NAME}, CPF {CPF}."}]}},
+    )
+    report = (await seeded.fetchrow("SELECT report::text AS r FROM analyses WHERE id = $1::uuid", aid))["r"]
+    assert [s for s in (NAME, CPF, "99988877766") if s in report] == []
+    assert "[CPF]" in report

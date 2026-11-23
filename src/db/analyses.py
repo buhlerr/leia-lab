@@ -15,7 +15,7 @@ from typing import Any
 import asyncpg
 
 from src.db.rules import RulesSnapshot, canonical_json
-from src.ingest.masking import MaskedText, requires_masked
+from src.ingest.masking import MaskedText, mask_payload, requires_masked
 
 
 @requires_masked("filename_alias", "masked_text")
@@ -74,7 +74,9 @@ async def finish_analysis(
         analysis_id,
         status,
         minuta_type,
-        json.dumps(report, ensure_ascii=False, default=str) if report is not None else None,
+        # O banco e egresso (compartilhado com o Directus): o relatorio e mascarado AQUI,
+        # fail-safe, mesmo que um passo malcomportado monte texto cru. Idempotente no que ja e mascarado.
+        json.dumps(mask_payload(report), ensure_ascii=False, default=str) if report is not None else None,
     )
 
 
@@ -98,9 +100,14 @@ async def append_trail(
 
     Cada passo: ``step`` e, opcionais, ``clause_n``, ``input_summary`` (so dado MASCARADO),
     ``decision``, ``score``, ``cutoff`` e ``cited_norms``. ``snap_meta`` traz as versoes da foto.
+
+    O banco e egresso (compartilhado com o Directus): os passos sao mascarados AQUI, fail-safe
+    -- um passo malcomportado que monte texto cru nao chega cru ao ``analysis_trail``.
+    Mascarar e idempotente no conteudo que ja veio mascarado do estado.
     """
     if not steps:
         return
+    steps = mask_payload(steps)
     async with pool.acquire() as conn, conn.transaction():
         await _insert_steps(conn, analysis_id, snap_meta, steps)
 
