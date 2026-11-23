@@ -156,6 +156,8 @@ API_TIMEOUT_S = 300  # a API roda a analise inteira de forma sincrona; o gunicor
 
 class NovaAnaliseForm(forms.Form):
     file = forms.FileField(help_text="Minuta .pdf, .docx ou .txt. O nome real do arquivo não sai desta máquina.")
+    # Gerada ao abrir o formulário: duplo clique ou reenvio repetem a chave e a API não roda de novo.
+    idempotency_key = forms.UUIDField(widget=forms.HiddenInput)
 
     def clean_file(self):
         f = self.cleaned_data["file"]
@@ -166,10 +168,10 @@ class NovaAnaliseForm(forms.Form):
         return f
 
 
-def post_analysis(filename: str, data: bytes) -> tuple[int, dict]:
+def post_analysis(filename: str, data: bytes, idempotency_key: uuid.UUID) -> tuple[int, dict]:
     """Envia a minuta à API (multipart, campo ``file``) e devolve ``(status, corpo JSON)``.
 
-    Cada envio do formulário é uma análise nova: uma ``Idempotency-Key`` nova por chamada.
+    ``idempotency_key`` vem do formulário aberto: o mesmo formulário enviado de novo é a mesma análise.
 
     Sem ``LEIA_API_TOKEN`` não faz nenhuma requisição: devolve ``(0, {})``. Falha de rede levanta
     ``httpx.HTTPError``. O nome do arquivo vai só no multipart: nunca em log, nunca na resposta.
@@ -180,7 +182,7 @@ def post_analysis(filename: str, data: bytes) -> tuple[int, dict]:
         response = client.post(
             f"{settings.LEIA_API_URL}/v1/analyses",
             files={"file": (filename, data)},
-            headers={"Authorization": f"Bearer {settings.LEIA_API_TOKEN}", "Idempotency-Key": str(uuid.uuid4())},
+            headers={"Authorization": f"Bearer {settings.LEIA_API_TOKEN}", "Idempotency-Key": str(idempotency_key)},
         )
         try:
             body = response.json()
@@ -237,16 +239,21 @@ class AnalysisAdmin(_ReadOnlyAdmin):
         if request.method == "POST" and form.is_valid():
             upload = form.cleaned_data["file"]
             try:
-                status, body = post_analysis(upload.name, upload.read())
+                status, body = post_analysis(upload.name, upload.read(), form.cleaned_data["idempotency_key"])
             except httpx.HTTPError:
                 erro = "API indisponível."
             else:
-                if status == 201 and body.get("analysis_id"):
+                # 200: reenvio de uma análise já feita; analysis_in_progress: o 1º envio ainda roda.
+                abre_detalhe = status in (200, 201) or body.get("code") == "analysis_in_progress"
+                if abre_detalhe and body.get("analysis_id"):
                     return redirect("admin:domain_analysis_change", body["analysis_id"])
                 if status == 0:
                     erro = "Token da API ausente (defina LEIA_API_TOKEN)."
                 else:
                     erro = str(body.get("message") or "API indisponível.")
+            form = None  # a chave deste envio já foi usada: tentar de novo é uma análise nova
+        if form is None or not form.is_bound:
+            form = NovaAnaliseForm(initial={"idempotency_key": uuid.uuid4()})
         context = {
             **self.admin_site.each_context(request),
             "title": "Nova análise",
