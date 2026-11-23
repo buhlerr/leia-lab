@@ -22,6 +22,7 @@ import json
 import re
 import weakref
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from functools import wraps
 from pathlib import Path
 from typing import Any, Literal, TypedDict
@@ -49,6 +50,31 @@ _EMPTY_TEXT_MSG = "text must be a non-empty string"
 _UNMASKED_MSG = "graph input needs masked 'text'; use analyze()/prepare_input() (raw text never enters the graph)"
 _CONCURRENCY = 8  # teto global de chamadas externas (Jev, LLM, embeddings) por loop
 _EXCERPT = 200  # caracteres do texto MASCARADO da clausula guardados na trilha
+
+
+@dataclass
+class CostBudget:
+    """Teto de gasto (US$) das chamadas de chat de uma analise.
+
+    A checagem acontece DEPOIS de adquirir o semaforo de concorrencia, na hora da
+    chamada HTTP: todas as corotinas do redator sao criadas de uma vez pelo gather,
+    e conferir na criacao deixaria todas passarem.
+    """
+
+    limit_usd: float
+    spent_usd: float = 0.0
+
+    @property
+    def exhausted(self) -> bool:
+        return self.spent_usd >= self.limit_usd
+
+    def charge(self, cost: float) -> None:
+        self.spent_usd += cost
+
+
+class BudgetExhausted(Exception):
+    """Clause writing skipped: the analysis cost cap (ANALYSIS_MAX_COST_USD) was reached."""
+
 
 # Criterios das perguntas ao Jev. As INSTRUCOES vem da tabela prompts; os criterios ainda sao codigo.
 _UNSUPPORTED = "Qualquer outro documento, como lei, codigo, parecer, contrato de outro tipo ou texto sem relacao."
@@ -172,6 +198,7 @@ def build_analyze_minuta_graph(
         "confirm_cutoff": confirm_cutoff,
         "norm_cutoff": norm_cutoff,
         "max_clauses": max_clauses,
+        "max_cost_usd": cfg.ANALYSIS_MAX_COST_USD,
     }
     limiters: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = weakref.WeakKeyDictionary()
 
@@ -188,10 +215,16 @@ def build_analyze_minuta_graph(
         async with _limiter():
             return await embed_text(text, cfg)
 
-    async def llm(system: str, user: str, model: str | None = None) -> ChatResult:
+    async def llm(system: str, user: str, budget: CostBudget, model: str | None = None) -> ChatResult:
         use = cfg.model_copy(update={"CHAT_MODEL": model}) if model else cfg
+        # Checagem DEPOIS do semaforo: o gather cria todas as corotinas de uma vez,
+        # e conferir antes deixaria todas as chamadas em andamento passarem.
         async with _limiter():
-            return await chat_completion(system, user, use, temperature=0.1, json_output=True)
+            if budget.exhausted:
+                raise BudgetExhausted
+            r = await chat_completion(system, user, use, temperature=0.1, json_output=True)
+            budget.charge(r.cost_usd)
+            return r
 
     async def rec(state: AnalyzeMinutaState, steps: list[dict[str, Any]]) -> None:
         await append_trail(pool, state["analysis_id"], state["rules_meta"], steps)
@@ -517,8 +550,10 @@ def build_analyze_minuta_graph(
             key=lambda c: -max(x["noul"] for x in c["confirmados"]),
         )
         redigir, fora = fila[:max_clauses], fila[max_clauses:]
+        budget = CostBudget(cfg.ANALYSIS_MAX_COST_USD)
+        chat_model = redator.get("model") or cfg.CHAT_MODEL
 
-        async def redigir_um(cl: dict[str, Any]) -> tuple[dict[str, Any], str, int]:
+        async def redigir_um(cl: dict[str, Any]) -> dict[str, Any] | None:
             riscos_txt = "\n".join(f"- {x['id']}: {x['risco']}" for x in cl["confirmados"])
             normas_txt = "\n".join(f"- {n['citacao']}: {n['texto']}" for n in cl["normas"]) or "(nenhuma)"
             msg = (
@@ -529,24 +564,32 @@ def build_analyze_minuta_graph(
             )
             bruto = ""
             try:
-                r = await llm(redator["text"], msg, redator.get("model"))
+                r = await llm(redator["text"], msg, budget, redator.get("model"))
                 bruto = r.text
                 m = re.search(r"\{.*\}", bruto, re.S)
                 if m is None:
                     raise ValueError("no json")
                 return json.loads(m.group(0)), bruto, r.tokens
+            except BudgetExhausted:
+                # Sem "analise", como as alem de max_clauses: nao e uma falha.
+                return None
             except Exception as e:  # noqa: BLE001 - so o tipo, nunca a mensagem (pode conter texto)
                 return {"erro": type(e).__name__}, bruto, 0
 
         res = await _gather([redigir_um(cl) for cl in redigir])
-        for cl, (a, bruto, _) in zip(redigir, res, strict=True):
-            cl["analise"] = a
-            cl["analise_bruta"] = bruto
+        sem_orcamento = 0
+        for cl, r in zip(redigir, res, strict=True):
+            if r is None:
+                sem_orcamento += 1
+                continue
+            cl["analise"], cl["analise_bruta"] = r[0], r[1]
         stats = {
             **state.get("stats", {}),
-            "tokens_analise": sum(x[2] for x in res),
+            "tokens_analise": sum(r[2] for r in res if r is not None),
             "nao_redigidas": len(fora),
-            "falhas_redacao": sum(1 for a, _, _ in res if "erro" in a),
+            "falhas_redacao": sum(1 for r in res if r is not None and "erro" in r[0]),
+            "custo_usd_redacao": round(budget.spent_usd, 6),
+            "sem_orcamento": sem_orcamento,
         }
         await rec(
             state,
@@ -555,10 +598,13 @@ def build_analyze_minuta_graph(
                     "step": "analisar",
                     "input_summary": {"clausulas_com_risco": len(fila)},
                     "decision": {
-                        "redigidas": len(redigir),
+                        "redigidas": len(redigir) - sem_orcamento,
                         "nao_redigidas": len(fora),
                         "falhas": stats["falhas_redacao"],
                         "redator_model": redator.get("model"),
+                        "chat_model": chat_model,
+                        "custo_usd": stats["custo_usd_redacao"],
+                        "sem_orcamento": sem_orcamento,
                     },
                 }
             ],
