@@ -60,6 +60,8 @@ def _check(types: dict[str, dict[str, Any]]) -> None:
         missing = [k for k in REQUIRED_PROMPTS if k not in t["prompts"]]
         if missing:
             raise RulesConfigError(f"tipo {slug!r} sem prompt ativo: {', '.join(missing)}")
+        if "{risco}" not in t["prompts"]["confirmar_risco"]["text"]:
+            raise RulesConfigError(f"tipo {slug!r}: confirmar_risco sem o marcador {{risco}}")
 
 
 async def load_rules_snapshot(pool: asyncpg.Pool) -> RulesSnapshot:
