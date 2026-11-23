@@ -43,7 +43,7 @@ Read every TLC result with the pstack `/statechart` skill: a violation becomes i
 
 ## Coverage record
 
-Sync commit: `60fc4cd0f6897b7059d157a06f40a63df8f5662a`. At that commit the `fixed` design was checked line by line against this code:
+Sync commit: `84ec146583c52b0e9578a5cd2a7fad79dee5d47e`. At that commit the `fixed` design was checked line by line against this code:
 
 | model | code |
 |---|---|
@@ -58,7 +58,7 @@ Sync commit: `60fc4cd0f6897b7059d157a06f40a63df8f5662a`. At that commit the `fix
 Did the covered code change since the sync commit?
 
 ```bash
-git diff --stat 60fc4cd0f6897b7059d157a06f40a63df8f5662a -- src/graphs/analyze_minuta_graph.py src/db/analyses.py src/db/schema.sql
+git diff --stat 84ec146583c52b0e9578a5cd2a7fad79dee5d47e -- src/graphs/analyze_minuta_graph.py src/db/analyses.py src/db/schema.sql
 ```
 
 If it did, reread the changed parts against the table. Move the sync commit forward (edit this file) only after you confirm the `fixed` design still describes the code at the new commit.
