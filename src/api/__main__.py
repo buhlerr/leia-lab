@@ -10,7 +10,6 @@ from src.api.app import create_app
 
 
 def main() -> None:
-    # create_app le o resto do ambiente (.env inclusive) e recusa subir sem token.
     port = int(os.environ.get("PORT", "8080"))
     uvicorn.run(create_app(), host="0.0.0.0", port=port)
 

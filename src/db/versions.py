@@ -44,9 +44,6 @@ def _combined(hashes: dict[str, str]) -> str:
     return hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest()
 
 
-# --- leitura (pura, sem banco) -------------------------------------------------
-
-
 def read_base(version: str = "v1", data_dir: Path = DATA_DIR) -> tuple[list[dict[str, Any]], str]:
     """Artigos da base normativa (``citacao``, ``id``, ``texto``, ``fonte``...) e o sha256 da versao."""
     d = data_dir / "base-normativa" / version
@@ -85,9 +82,6 @@ def read_matrix(
     return rows, manifest["sha256"]
 
 
-# --- ledger -----------------------------------------------------------------------
-
-
 async def _already_applied(conn: asyncpg.Connection, name: str, sha: str) -> bool:
     recorded = await conn.fetchval("SELECT sha256 FROM data_versions WHERE name = $1", name)
     if recorded is None:
@@ -104,9 +98,7 @@ async def applied_versions(pool: asyncpg.Pool) -> dict[str, str]:
     return {r["name"]: r["sha256"] for r in await pool.fetch("SELECT name, sha256 FROM data_versions ORDER BY name")}
 
 
-# --- base normativa ---------------------------------------------------------------
-
-IngestFn = Callable[[str, str, str], Awaitable[Any]]  # (texto, citacao, source)
+IngestFn = Callable[[str, str, str], Awaitable[Any]]
 
 
 async def apply_base(pool: asyncpg.Pool, ingest_fn: IngestFn, version: str = "v1", data_dir: Path = DATA_DIR) -> int:
@@ -138,9 +130,6 @@ async def apply_base(pool: asyncpg.Pool, ingest_fn: IngestFn, version: str = "v1
         if not await _already_applied(conn, name, sha):
             await conn.execute("INSERT INTO data_versions (name, sha256) VALUES ($1, $2)", name, sha)
     return len(novos)
-
-
-# --- matriz -------------------------------------------------------------------------
 
 
 async def apply_matrix(

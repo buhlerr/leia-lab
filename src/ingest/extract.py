@@ -25,7 +25,6 @@ from pypdf import apply_configuration
 # pode inflar para gigabytes e esgotar a memoria da maquina.
 MAX_UPLOAD_BYTES = 32 * 1024 * 1024
 MAX_DOCX_UNCOMPRESSED_BYTES = 64 * 1024 * 1024
-# Mesmo teto do pipeline: nao adianta extrair texto que seria recusado depois.
 MAX_TEXT_CHARS = 200_000
 # Limitam a memoria de um PDF com muitas streams infladas.
 MAX_PDF_PAGES = 500

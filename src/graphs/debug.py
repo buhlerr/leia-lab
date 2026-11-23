@@ -75,7 +75,6 @@ class LazyAsyncpgPoolProxy:
         return await pool.fetchval(*args, **kwargs)
 
     def acquire(self, *args: Any, **kwargs: Any) -> Any:
-        # Context manager assíncrono para pool.acquire()
         outer = self
 
         class _AcquireContext:
@@ -103,5 +102,4 @@ def build_app(checkpointer: Any = None) -> Any:
     return build_graph(checkpointer=checkpointer)
 
 
-# Instância compilada diretamente acessível
 graph = build_graph()

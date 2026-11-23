@@ -13,8 +13,6 @@ import unicodedata
 from pathlib import Path
 from typing import Any
 
-# --- LeiaFicha -------------------------------------------------------------
-
 DATA_RE = re.compile(
     r"\b\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}\b|\b\d{1,2}º?\s+de\s+[a-zçã]+\s+de\s+\d{4}\b",
     re.I,
@@ -47,8 +45,6 @@ def extract_ficha_candidates(text: str, limit: int = 14) -> dict[str, list[tuple
     }
 
 
-# --- LeiaTriar: segmentação -------------------------------------------------
-
 _HEADER_RE = re.compile(
     r"(?i)(?=\b(?:cl[áa]usula\s+(?:\d+|[a-zà-ÿ]+)[ªºa°]?(?:\s+[a-zà-ÿ]+)?\s*(?:[-–—:.]|\s))"
     r"|(?<![\d.,])\b\d{1,2}\.\d{1,2}(?:\.\d{1,2})?\.?\s+(?=[A-ZÀ-Ý]))"
@@ -79,8 +75,6 @@ def segment_clauses(text: str) -> list[str]:
     return final
 
 
-# --- Matriz de riscos / temas -----------------------------------------------
-
 DEFAULT_TEMAS: list[str] = [
     "benfeitorias_e_conservacao",
     "foro_processo_e_arbitragem",
@@ -90,7 +84,6 @@ DEFAULT_TEMAS: list[str] = [
     "reajuste_e_indexacao",
 ]
 
-# Fallback mínimo embutido; a matriz real (ainda não validada por advogado) vem de load_risk_matrix.
 DEFAULT_RISCOS: dict[str, list[dict[str, Any]]] = {
     "reajuste_e_indexacao": [
         {
@@ -167,7 +160,7 @@ def citacao_de(norma: str, artigo: Any = None) -> str:
 def norm_slug(citacao: str) -> str:
     """Id estavel de uma citacao: ``Lei 8.245/1991, art. 35`` -> ``lei-8245-1991-art-35``."""
     s = unicodedata.normalize("NFKD", citacao).encode("ascii", "ignore").decode()
-    s = re.sub(r"(?<=\d)\.(?=\d)", "", s)  # 8.245 -> 8245, como nos ids da base normativa
+    s = re.sub(r"(?<=\d)\.(?=\d)", "", s)
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")
 
 
@@ -232,8 +225,6 @@ def load_risk_matrix(
                 ids.append(n["id"])
     return sorted(riscos), riscos, tema_map
 
-
-# --- LeiaValidar -------------------------------------------------------------
 
 _COR = {"vermelho": "red", "amarelo": "yellow", "verde": "green"}
 _ROTULO = {"red": "VERMELHO", "yellow": "AMARELO", "green": "VERDE"}

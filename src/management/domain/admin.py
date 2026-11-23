@@ -44,9 +44,6 @@ from src.management.domain.models import (
 KB_SUFFIXES = (".txt", ".md", ".pdf", ".docx")
 
 
-# ---------------------------------------------------------------- dominio (editavel)
-
-
 class ThemeInline(admin.TabularInline):
     model = Theme
     extra = 0
@@ -101,9 +98,6 @@ class PromptAdmin(admin.ModelAdmin):
     search_fields = ("prompt_text",)
 
 
-# ---------------------------------------------------------------- auditoria (so leitura)
-
-
 class _ReadOnlyAdmin(admin.ModelAdmin):
     def has_add_permission(self, request, obj=None) -> bool:
         return False
@@ -148,22 +142,19 @@ class TrailInline(admin.TabularInline):
         return False
 
 
-# ---------------------------------------------------------------- nova analise (pela API)
-
 ANALISE_SUFFIXES = (".pdf", ".docx", ".txt")
-API_TIMEOUT_S = 300  # a API roda a analise inteira de forma sincrona; o gunicorn espera 330 s
+API_TIMEOUT_S = 300  # o gunicorn da API espera 330 s
 
 
 class NovaAnaliseForm(forms.Form):
     file = forms.FileField(help_text="Minuta .pdf, .docx ou .txt. O nome real do arquivo não sai desta máquina.")
-    # Gerada ao abrir o formulário: duplo clique ou reenvio repetem a chave e a API não roda de novo.
     idempotency_key = forms.UUIDField(widget=forms.HiddenInput)
 
     def clean_file(self):
         f = self.cleaned_data["file"]
         if Path(f.name).suffix.lower() not in ANALISE_SUFFIXES:
             raise forms.ValidationError("Use .pdf, .docx ou .txt.")
-        if f.size > MAX_UPLOAD_BYTES:  # o mesmo teto da API, antes de ler o arquivo na memoria
+        if f.size > MAX_UPLOAD_BYTES:
             raise forms.ValidationError("O arquivo excede o limite de tamanho permitido.")
         return f
 
@@ -213,7 +204,7 @@ class AnalysisAdmin(_ReadOnlyAdmin):
         "duracao", "alertas", "trace", "started_at", "finished_at", "text_sha256", "rules_hash",
         "domain_history_id", "params", "rules_snapshot", "report",
     )
-    readonly_fields = fields  # tudo é leitura; duracao/alertas/trace são calculados
+    readonly_fields = fields
 
     @admin.display(description="id")
     def short_id(self, obj: Analysis) -> str:
@@ -233,7 +224,7 @@ class AnalysisAdmin(_ReadOnlyAdmin):
     def nova_view(self, request):
         """Formulário de upload que o servidor repassa à API; quem grava é a API, não o admin."""
         if not self._pode_nova(request.user):
-            raise PermissionDenied  # leitor vê a lista e o detalhe, mas não dispara análise
+            raise PermissionDenied
         erro = None
         form = NovaAnaliseForm(request.POST or None, request.FILES or None)
         if request.method == "POST" and form.is_valid():
@@ -243,7 +234,6 @@ class AnalysisAdmin(_ReadOnlyAdmin):
             except httpx.HTTPError:
                 erro = "API indisponível."
             else:
-                # 200: reenvio de uma análise já feita; analysis_in_progress: o 1º envio ainda roda.
                 abre_detalhe = status in (200, 201) or body.get("code") == "analysis_in_progress"
                 if abre_detalhe and body.get("analysis_id"):
                     return redirect("admin:domain_analysis_change", body["analysis_id"])
@@ -252,7 +242,6 @@ class AnalysisAdmin(_ReadOnlyAdmin):
                 else:
                     erro = str(body.get("message") or "API indisponível.")
         if request.method != "POST" or form.is_valid():
-            # GET, ou a chave deste envio já foi à API: o próximo envio é uma análise nova
             form = NovaAnaliseForm(initial={"idempotency_key": uuid.uuid4()})
         context = {
             **self.admin_site.each_context(request),
@@ -283,7 +272,7 @@ class AnalysisAdmin(_ReadOnlyAdmin):
         from src.tracing import find_trace
 
         ref = find_trace(settings.LEIA_MLFLOW_URL, settings.MLFLOW_EXPERIMENT_NAME, obj.id)
-        if ref is None:  # MLflow fora do ar, trace ainda no lote de envio ou filtro sem resposta
+        if ref is None:
             recente = obj.finished_at and (timezone.now() - obj.finished_at).total_seconds() < 60
             return "trace sendo gravado: recarregue em alguns segundos" if recente else "sem trace"
         url = (
@@ -302,9 +291,6 @@ class AnalysisTrailAdmin(_ReadOnlyAdmin):
     @admin.display(description="cited_norms")
     def cited_norms_preview(self, obj: AnalysisTrail) -> str:
         return ", ".join(obj.cited_norms or [])
-
-
-# ---------------------------------------------------------------- base normativa
 
 
 def run_with_pool(fn: Callable[[asyncpg.Pool], Awaitable[Any]]) -> Any:
@@ -337,7 +323,7 @@ def ingest_upload(filename: str, data: bytes, *, title: str, source: str) -> str
     if suffix not in KB_SUFFIXES:
         raise ValueError(f"formato nao suportado: {suffix}")
     with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / f"upload{suffix}"  # nome neutro: o nome original nao vai a lugar nenhum
+        path = Path(tmp) / f"upload{suffix}"
         path.write_bytes(data)
 
         async def go(pool: asyncpg.Pool) -> str:
@@ -357,7 +343,6 @@ def reindex_chunks(chunks) -> tuple[int, str]:
     settings = Settings()
 
     async def embed_all() -> list:
-        # O conteudo ja foi mascarado na ingestao; mascarar de novo nao o altera e o marca como MaskedText.
         return [await embed_text(mask_personal_data(c.content), settings) for c in chunks]
 
     results = asyncio.run(embed_all())

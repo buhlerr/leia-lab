@@ -68,7 +68,6 @@ def build_query_graph(pool: asyncpg.Pool, settings: Settings | None = None):
         prompt = CONSULTA_PROMPT_TEMPLATE.replace("{context}", state["parsed_context"]).replace(
             "{question}", state["question"]
         )
-        # O prompt montado e str comum; mascarar de novo o que ja e mascarado nao o altera.
         return {"prompt": mask_personal_data(prompt)}
 
     async def generate_answer(state: QueryState) -> dict[str, Any]:

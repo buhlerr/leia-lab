@@ -29,7 +29,6 @@ _INGEST_TEXT_EXTENSIONS = frozenset({".txt", ".md"})
 
 
 class IngestState(TypedDict, total=False):
-    # Sem raw_text / file_path / filename / doc_name, de proposito (ver docstring do modulo).
     source: str
     chunk_size: int
     chunk_overlap: int
