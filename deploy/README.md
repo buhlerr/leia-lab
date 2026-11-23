@@ -41,7 +41,7 @@ A mesma imagem serve a API: no compose, o serviço `api` troca o entrypoint por 
 (porta 8080) e lê `DATABASE_URL` e `LEIA_API_TOKEN` de um `api.env`. O login do banco é próprio:
 
 ```sql
-CREATE ROLE api_login LOGIN PASSWORD '<senha>' IN ROLE leia_app;   -- grants do motor (leia_app); não é dono das tabelas
+CREATE ROLE api_login LOGIN PASSWORD '<senha>' IN ROLE leia_api;   -- grants mínimos da API (leia_api); não é dono das tabelas
 ```
 
 Endereço, túnel e como atualizar: `docs/OPERACAO.md`.
