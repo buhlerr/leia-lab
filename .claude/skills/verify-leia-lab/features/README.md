@@ -43,4 +43,4 @@ Each feature file starts with an H1 title and one paragraph describing the user-
 - [Privacy boundary](./privacy.md) covers masking, filename alias and the graphs' refusal of raw text, offline and without a database.
 - [Admin rule editing](./admin-rules.md) covers login, the domain changelists, saving a risk and the `domain_history` audit.
 
-Not mapped yet: `trace-usage` and `--trace` (need LangSmith/MLflow credentials through Shelve and spend plan quota), knowledge-base upload in the admin (`KbDoc`), and the read-only admin views of analyses and trail.
+Not mapped yet: `trace-usage` and `--trace` (need LangSmith/MLflow credentials through 1Password (`.env.op`) and spend plan quota), knowledge-base upload in the admin (`KbDoc`), and the read-only admin views of analyses and trail.

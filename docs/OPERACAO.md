@@ -20,7 +20,7 @@ grupos `editor` ou `leitor`.
 
 API de integração do Pangolin: `https://pangolin.rauvbr.com/v1` (rota `integration-api-rauvbr` no
 `dynamic_config.yml` do Traefik na VPS, backup `dynamic_config.yml.bak-integration-rauvbr-20261116`).
-A chave fica no **Shelve** (time `vitor`, projeto `LEIA`), ver "Segredos" abaixo.
+A chave fica no 1Password, item `Pangolin API Key - leialab` do cofre `DEV`, ver "Segredos" abaixo.
 
 Se um Newt mudar de máquina, atualize os IPs em `/usr/local/sbin/leia-admin-firewall.sh` no CT 116 e
 rode `systemctl restart leia-admin-firewall`.
@@ -48,23 +48,54 @@ git archive --format=tar.gz -o leia-api-<sha>.tar.gz <sha> pyproject.toml uv.loc
 docker compose build api && docker compose up -d --no-deps api
 ```
 
-## Segredos (Shelve)
+## Segredos (1Password)
 
-`shelve.json` na raiz aponta para o time `vitor`, projeto `LEIA` (padrão `development`; `production`
-protegido contra push). Os segredos entram só no processo filho, sem `.env` em disco:
+Os segredos de desenvolvimento ficam no 1Password, cofre `DEV`, itens com a tag `leia-lab` (ADR-0003).
+O `.env.op` na raiz é versionado e só tem referências `op://`. Os valores entram só no processo filho,
+sem `.env` em disco:
 
 ```bash
-shelve run --env production -- uv run python -m src.cli gold-run --label real-v1 --trace
+op run --env-file=.env.op -- uv run python -m src.cli gold-run --label real-v1 --trace
 ```
 
-| No Shelve | Fora dele |
+| Variável | Item no cofre `DEV` |
 |---|---|
-| `PANGOLIN_API_KEY`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT` | `SHELVE_TOKEN` e `LEIA_HOMELAB_PG_PASSWORD` / `LEIA_HOMELAB_DIRECTUS_PASSWORD` (variáveis de usuário do Windows) |
+| `OPENROUTER_API_KEY` | `OpenRouter API Key - leialab` (a chave paga, a mesma do `api.env` do CT 116) |
+| `TYPESAFE_API_KEY` | `TypeSafe API Key - leialab` |
+| `LANGSMITH_API_KEY` | `LangSmith API Key - leialab` (`LANGSMITH_PROJECT=leia-lab` vai em claro no `.env.op`) |
+| `LINEAR_API_KEY` | `Linear` |
+| Fora do `.env.op` | `Pangolin API Key - leialab`, `Langfuse - leialab` (o projeto não usa; guardados na migração do Shelve) |
 
-- Rode pelo **Git Bash**: o PowerShell remove o `--` antes de repassar a comandos nativos, e o
-  `shelve run` passa a tratar o nome do ambiente como o programa ("Failed to start child process").
-- **Não use `shelve pull`** em sessão de agente (grava os segredos em claro no disco).
-- Faltam `TYPESAFE_API_KEY` e `OPENROUTER_API_KEY` (bead `leia-lab-8tr.9`): cadastre pelo app.
+- **Windows:** a CLI `op` usa o app desktop do 1Password (Settings → Developer → Integrate with
+  1Password CLI). Rode pelo Git Bash, como antes.
+- **VPS:** conta de serviço **só de leitura** no cofre `DEV`, token em `~/.config/op/leia-lab.token`
+  (mode 600, fora do git). Antes do `op run`: `export OP_SERVICE_ACCOUNT_TOKEN="$(cat ~/.config/op/leia-lab.token)"`.
+- **Não use `op inject` nem `op read` para gravar valores em arquivo** em sessão de agente.
+- Os `.env` de produção no CT 116 (`/root/leia/*.env`) continuam como estão; não leem do 1Password.
+- `LEIA_HOMELAB_PG_PASSWORD` / `LEIA_HOMELAB_DIRECTUS_PASSWORD` seguem como variáveis de usuário do Windows.
+
+## Sincronização das tarefas com o Linear
+
+Beads e Linear (time `VIT`, workspace `rauvbr`) sincronizam nos dois sentidos: o que muda no Linear
+(fechar, reabrir, prioridade, título) chega ao Beads, e o Linear mostra as tarefas abertas. Em conflito,
+vence a edição mais recente. A configuração (`linear.team_id`, `linear.state_map.*`,
+`linear.outbound_state_map.*`) fica no banco do Beads e viaja com `bd dolt push` / `bd dolt pull`.
+
+```bash
+op run --env-file=.env.op -- scripts/linear-sync.sh --dry-run   # ver antes
+op run --env-file=.env.op -- scripts/linear-sync.sh             # sincronizar
+```
+
+O script faz três passos: puxa tudo do Linear, envia as tarefas abertas e envia as fechadas que já estão
+no Linear (para irem a Done lá). **Não rode `bd linear sync` puro:** ele enviaria as 62 tarefas fechadas
+antes do espelho, que ficam só no Beads.
+
+- Estados: `open` → Todo, `in_progress` → In Progress, `closed` → Done. Na volta, Backlog e Todo viram
+  `open`, In Progress e In Review viram `in_progress`, Done, Canceled e Duplicate viram `closed`.
+- Rótulos de triagem existem no Linear (`needs-triage`, `needs-info`, `ready-for-agent`,
+  `ready-for-human`, `wontfix`). Tipos (`task`, `feature`) não viram rótulo; épicos viram issue-pai.
+- Comentários, anexos e dependências não sincronizam.
+- Issue criada direto no Linear entra no Beads na próxima sincronização.
 
 ## Backup e restore do Postgres
 
