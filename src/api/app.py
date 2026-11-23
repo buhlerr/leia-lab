@@ -35,7 +35,7 @@ from src.api.service import evaluate_upload, load_analysis
 from src.config import Settings
 from src.graphs.analyze_minuta_graph import build_analyze_minuta_graph
 from src.ingest.extract import MAX_UPLOAD_BYTES, DocumentError
-from src.tracing import configure_mlflow, mlflow_request, shutdown_mlflow, use_short_mlflow_http
+from src.tracing import mlflow_configured, mlflow_request, use_short_mlflow_http
 
 _log = logging.getLogger(__name__)
 
@@ -87,8 +87,8 @@ def _require_token_factory(expected: str) -> Any:
     return require_token
 
 
-async def _start_mlflow(cfg: Settings) -> bool:
-    """Liga o MLflow do processo; se ele nao responder, a API sobe sem rastreio.
+async def _start_mlflow(cfg: Settings, stack: contextlib.ExitStack) -> bool:
+    """Liga o MLflow do processo ate ``stack`` fechar; se ele nao responder, a API sobe sem rastreio.
 
     O rastreio e vista de depuracao, nao a auditoria (que fica no Postgres): o MLflow fora do ar
     nunca impede a API de subir.
@@ -97,9 +97,8 @@ async def _start_mlflow(cfg: Settings) -> bool:
     # O trace so fica buscavel quando o span raiz sai do lote; o padrao espera ate 5 s e o admin,
     # que abre o detalhe logo depois do POST, mostraria "sem trace".
     os.environ.setdefault("MLFLOW_ASYNC_TRACE_LOGGING_MAX_INTERVAL_MILLIS", "500")
-    try:
-        await asyncio.to_thread(configure_mlflow, cfg.MLFLOW_TRACKING_URI, cfg.MLFLOW_EXPERIMENT_NAME)
-    except Exception:
+    configured = mlflow_configured(cfg.MLFLOW_TRACKING_URI, cfg.MLFLOW_EXPERIMENT_NAME)
+    if not await asyncio.to_thread(stack.enter_context, configured):
         _log.warning("MLflow indisponivel na subida; a API segue sem rastreio ate reiniciar")
         return False
     return True
@@ -119,12 +118,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.graph = build_analyze_minuta_graph(pool, cfg)
         app.state.mlflow_on = False
         try:
-            if cfg.MLFLOW_TRACKING_URI:  # LangSmith fica fora da API: so o MLflow self-hosted
-                app.state.mlflow_on = await _start_mlflow(cfg)
-            yield
+            with contextlib.ExitStack() as mlflow_stack:
+                if cfg.MLFLOW_TRACKING_URI:  # LangSmith fica fora da API: so o MLflow self-hosted
+                    app.state.mlflow_on = await _start_mlflow(cfg, mlflow_stack)
+                yield
         finally:
-            if app.state.mlflow_on:
-                shutdown_mlflow()
             await pool.close()
 
     app = FastAPI(title="leia-lab API", version="1", lifespan=lifespan)
