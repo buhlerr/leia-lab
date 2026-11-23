@@ -1,14 +1,90 @@
-"""Mascaramento de PII e segmentacao de texto de contratos.
+"""Mascaramento de PII e segmentacao de texto de contratos: a fronteira de privacidade.
 
 Porta fiel de ``leia-kb-legislacao/scripts/langflow/mask_core.py`` (regras de
 nome e regex de dados pessoais) mais utilitarios de alias e split.
+
+``MaskedText`` e o unico texto que pode sair do processo (LLM, Jev, embeddings) ou ser gravado
+(``analyses``, ``kb_chunks``). So este modulo o cria. Cada funcao de fronteira e decorada com
+``requires_masked`` e recusa ``str`` comum com ``UnmaskedTextError``, antes de qualquer rastreio.
 """
 
 from __future__ import annotations
 
 import hashlib
+import inspect
 import re
+from collections.abc import Awaitable, Callable
+from functools import wraps
 from pathlib import PurePath
+from typing import Any, TypeVar
+
+_FIX = (
+    "pass it through src.ingest.masking.mask_personal_data first: mask the whole document once, "
+    "outside the graph (analyze(), ingest() and ask() do this)"
+)
+_KEY = object()
+
+
+class MaskedText(str):
+    """Texto que passou por este modulo. Fatiar ou concatenar devolve ``str`` comum."""
+
+    __slots__ = ()
+
+    def __new__(cls, value: str, *, _key: object = None) -> MaskedText:
+        if _key is not _KEY:
+            raise TypeError(f"MaskedText is created only by src.ingest.masking; {_FIX}")
+        return super().__new__(cls, value)
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_masked, (str(self),))
+
+
+def _masked(value: str) -> MaskedText:
+    return MaskedText(value, _key=_KEY)
+
+
+class UnmaskedTextError(ValueError):
+    """Texto comum (``str``, nao ``MaskedText``) tentou cruzar a fronteira de privacidade."""
+
+
+def require_masked(value: object, *, what: str) -> None:
+    """Recusa qualquer ``str`` comum em ``value`` (str, ou dict/list/tuple que as contenham).
+
+    A mensagem diz onde o texto tentou passar e como corrigir; nunca cita o texto.
+    """
+    if isinstance(value, MaskedText):
+        return
+    if isinstance(value, str):
+        raise UnmaskedTextError(f"{what} got unmasked text; {_FIX}")
+    if isinstance(value, dict):
+        value = list(value.values())
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            require_masked(item, what=what)
+
+
+_F = TypeVar("_F", bound=Callable[..., Awaitable[Any]])
+
+
+def requires_masked(*params: str) -> Callable[[_F], _F]:
+    """Marca uma funcao assincrona como fronteira: ``params`` so aceitam ``MaskedText``.
+
+    Fica por fora de ``client_span``: a recusa acontece antes de o rastreio registrar a entrada.
+    """
+
+    def decorate(fn: _F) -> _F:
+        sig = inspect.signature(fn)
+
+        @wraps(fn)
+        async def guarded(*args: Any, **kwargs: Any) -> Any:
+            bound = sig.bind(*args, **kwargs)
+            for p in params:
+                require_masked(bound.arguments.get(p), what=f"{fn.__name__}({p})")
+            return await fn(*args, **kwargs)
+
+        return guarded  # type: ignore[return-value]
+
+    return decorate
 
 _P = r"[A-ZÀ-Ý][A-Za-zÀ-ÿ'´-]+"
 _L = r"(?:\s+(?:de|da|do|dos|das|e|DE|DA|DO|DOS|DAS|E))?"
@@ -47,8 +123,10 @@ _RULES = [
 ]
 
 
-def mask_personal_data(text: str) -> str:
-    """Substitui PII por marcadores; nomes mais longos primeiro."""
+def mask_personal_data(text: str) -> MaskedText:
+    """Substitui PII por marcadores; nomes mais longos primeiro. ``MaskedText`` volta como veio."""
+    if isinstance(text, MaskedText):
+        return text
     nomes: set[str] = set()
     for regra in _NAME_RULES:
         for m in regra.finditer(text):
@@ -60,28 +138,40 @@ def mask_personal_data(text: str) -> str:
         text = re.sub(padrao, "[NOME]", text, flags=re.IGNORECASE)
     for regra, troca in _RULES:
         text = regra.sub(troca, text)
-    return text
+    return _masked(text)
 
 
-def resolve_doc_alias(filename: str, doc_name: str = "") -> str:
-    """Nome publico do documento: ``doc_name`` ou ``documento-<sha8>.<ext>``."""
+def mask_payload(value: Any) -> Any:
+    """``mask_personal_data`` em cada ``str`` de um payload (dict/list/tuple) montado no grafo."""
+    if isinstance(value, str):
+        return mask_personal_data(value)
+    if isinstance(value, dict):
+        return {k: mask_payload(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return type(value)(mask_payload(v) for v in value)
+    return value
+
+
+def resolve_doc_alias(filename: str, doc_name: str = "") -> MaskedText:
+    """Nome publico do documento: ``doc_name`` ou ``documento-<sha8>.<ext>``; o nome real nunca."""
     if doc_name:
-        return doc_name
+        return _masked(doc_name)
     digest = hashlib.sha256(filename.encode("utf-8")).hexdigest()[:8]
-    return f"documento-{digest}{PurePath(filename).suffix}"
+    return _masked(f"documento-{digest}{PurePath(filename).suffix}")
 
 
 def split_contract_text(
-    text: str,
+    text: MaskedText,
     chunk_size: int = 1200,
     chunk_overlap: int = 200,
     separator: str = "\n",
-) -> list[str]:
+) -> list[MaskedText]:
     """Agrupa segmentos separados por ``separator`` ate ``chunk_size`` caracteres.
 
     Cada novo chunk reinicia com ate ``chunk_overlap`` caracteres finais do
-    anterior. Nenhum chunk excede ``chunk_size``.
+    anterior. Nenhum chunk excede ``chunk_size``. Pedaco de texto mascarado continua mascarado.
     """
+    require_masked(text, what="split_contract_text(text)")
     pieces: list[str] = []
     for seg in text.split(separator):
         seg = seg.strip()
@@ -106,4 +196,4 @@ def split_contract_text(
         current = candidate
     if current:
         chunks.append(current)
-    return chunks
+    return [_masked(c) for c in chunks]

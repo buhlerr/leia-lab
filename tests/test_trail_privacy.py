@@ -15,6 +15,7 @@ from src.db.defaults import LOCACAO_RESIDENCIAL as LOCACAO
 from src.db.rules import verify_snapshot
 from src.db.seed import seed_defaults
 from src.graphs.analyze_minuta_graph import AnalyzeMinutaState, analyze, analyze_stream, build_analyze_minuta_graph
+from src.ingest import masking
 
 NAME = "Carlos Eduardo Mendes"
 CPF = "999.888.777-66"
@@ -85,8 +86,10 @@ async def test_no_personal_data_in_state_checkpoint_updates_trail_snapshot_or_re
 
 async def test_the_scan_catches_the_leak_when_masking_is_switched_off(seeded, settings, monkeypatch):
     """Prova de que o teste acima mede algo: sem mascaramento, o varredor tem de acusar."""
-    monkeypatch.setattr(mod, "mask_personal_data", lambda text: text)
-    monkeypatch.setattr(mod, "resolve_doc_alias", lambda filename, doc_name="": filename)
+    # Mascaramento desligado: sem regras, o texto cru sai como MaskedText e o grafo roda ate o fim.
+    monkeypatch.setattr(masking, "_NAME_RULES", [])
+    monkeypatch.setattr(masking, "_RULES", [])
+    monkeypatch.setattr(mod, "resolve_doc_alias", lambda filename, doc_name="": masking._masked(filename))
     leaks, _ = await _leaks(seeded, settings)
     for place in ("estado", "checkpoint", "updates por no", "trilha", "relatorio"):
         assert {NAME, CPF} <= set(leaks[place]) or FILE_NAME in leaks[place], place

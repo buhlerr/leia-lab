@@ -15,20 +15,22 @@ from typing import Any
 import asyncpg
 
 from src.db.rules import RulesSnapshot, canonical_json
+from src.ingest.masking import MaskedText, requires_masked
 
 
+@requires_masked("filename_alias", "masked_text")
 async def start_analysis(
     pool: asyncpg.Pool,
     snap: RulesSnapshot,
     *,
     analysis_id: str,
-    filename_alias: str,
-    masked_text: str,
+    filename_alias: MaskedText,
+    masked_text: MaskedText,
     params: dict[str, Any],
 ) -> None:
     """Insere a analise com o snapshot e a entrada ``iniciar`` da trilha, juntas ou nenhuma.
 
-    So o texto MASCARADO e hasheado; nada cru chega aqui.
+    So o texto MASCARADO e hasheado; str comum e recusada.
     """
     async with pool.acquire() as conn, conn.transaction():
         await conn.execute(

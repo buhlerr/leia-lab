@@ -5,7 +5,7 @@ Nenhum texto de minuta entra em logs ou mensagens de excecao.
 
 Privacidade (mesma regra do grafo de analise, M2b/M6): o grafo NUNCA ve texto cru.
 ``prepare_ingest_input`` (usado por ``ingest()``) le e mascara FORA do grafo; o estado nao tem
-``raw_text`` nem ``file_path``, e ``iniciar`` recusa texto que nao esteja mascarado.
+``raw_text`` nem ``file_path``, e ``iniciar`` recusa texto e apelido que nao sejam ``MaskedText``.
 """
 
 from __future__ import annotations
@@ -20,12 +20,11 @@ from langgraph.graph import END, START, StateGraph
 
 from src.config import Settings
 from src.ingest.isolated import extract_text_isolated
-from src.ingest.masking import mask_personal_data, resolve_doc_alias, split_contract_text
+from src.ingest.masking import MaskedText, mask_personal_data, require_masked, resolve_doc_alias, split_contract_text
 from src.rag.embeddings import embed_text
 from src.rag.hybrid_search import _to_pgvector_literal
 
 _EMPTY_TEXT_MSG = "text must be a non-empty string"
-_UNMASKED_MSG = "ingest input needs masked text; use ingest()/prepare_ingest_input() (raw text never enters the graph)"
 
 
 class IngestState(TypedDict, total=False):
@@ -33,9 +32,9 @@ class IngestState(TypedDict, total=False):
     source: str
     chunk_size: int
     chunk_overlap: int
-    masked_text: str
-    resolved_filename: str
-    chunks: list[str]
+    masked_text: MaskedText
+    resolved_filename: MaskedText
+    chunks: list[MaskedText]
     doc_id: str
     chunks_indexed: int
 
@@ -81,12 +80,7 @@ def build_ingest_graph(pool: asyncpg.Pool, settings: Settings | None = None, *, 
     cfg = settings or Settings()
 
     async def iniciar(state: IngestState) -> dict[str, Any]:
-        text = state.get("masked_text")
-        # Mascarar e idempotente: texto que muda ao ser mascarado de novo nao passou por prepare_ingest_input.
-        if not isinstance(text, str) or not text.strip() or mask_personal_data(text) != text:
-            raise ValueError(_UNMASKED_MSG)
-        if not state.get("resolved_filename"):
-            raise ValueError(_UNMASKED_MSG)
+        require_masked([state.get("masked_text", ""), state.get("resolved_filename", "")], what="ingest graph input")
         return {}
 
     async def split_node(state: IngestState) -> dict[str, Any]:
@@ -100,6 +94,7 @@ def build_ingest_graph(pool: asyncpg.Pool, settings: Settings | None = None, *, 
 
     async def index_node(state: IngestState) -> dict[str, Any]:
         chunks = state["chunks"]
+        require_masked([state["resolved_filename"], *chunks], what="kb_docs/kb_chunks insert")
         embedded = [await embed_text(chunk, cfg) for chunk in chunks]
         async with pool.acquire() as conn, conn.transaction():
             doc_id = await conn.fetchval(
