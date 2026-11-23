@@ -86,6 +86,14 @@ def test_validate_and_format_replaces_non_literal_excerpt_and_downgrades_red_wit
     assert diag["funil"] == {"yellow": 1}
 
 
+def test_validate_and_format_remarks_report_budget_skipped_clauses():
+    _, env, _ = validate_and_format(
+        {"filename": "m.txt", "tipo": "locacao_residencial", "suportado": True, "stats": {"sem_orcamento": 4}}
+    )
+    assert "4 clausulas ficaram sem redacao: o teto de custo por analise foi atingido." in env["remarks"]
+    assert not any("limite" in o for o in env["remarks"])  # nao e o limite de clausulas
+
+
 def test_validate_and_format_unsupported_returns_empty_alerts():
     _, env, diag = validate_and_format({"filename": "x.txt", "tipo": "nao_suportado", "suportado": False})
     assert env["status"] == "unsupported"
