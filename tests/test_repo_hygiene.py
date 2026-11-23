@@ -234,6 +234,26 @@ def test_top_level_rename_or_delete_breaks_citations(tmp_path: Path):
     ]
 
 
+def test_top_level_rename_in_older_commit_still_flagged(tmp_path: Path):
+    """No repo real o rename nao e o commit da vez: os pais imediatos do HEAD
+    ja tem o nome novo e nao denunciam nada. E a arvore do ponto de saida
+    (merge-base com origin/master) que mantem o nome velho reconhecivel."""
+    (tmp_path / "README.md").write_text("Rode `scripts/ci.sh`.\n", encoding="utf-8")
+    ci = tmp_path / "scripts"
+    ci.mkdir()
+    (ci / "ci.sh").write_text("x = 1\n", encoding="utf-8")
+    _commit_all(tmp_path)
+    _git("update-ref", "refs/remotes/origin/master", "HEAD", cwd=tmp_path)
+    _git("checkout", "-b", "feat", cwd=tmp_path)
+    _git("mv", "scripts", "tools", cwd=tmp_path)
+    _commit(tmp_path, "mv")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "x.md").write_text("x\n", encoding="utf-8")
+    _git("add", "docs", cwd=tmp_path)
+    _commit(tmp_path, "unrelated")
+    assert broken_cited_paths(cwd=tmp_path) == [("README.md", "scripts/ci.sh")]
+
+
 def test_citation_case_must_match_the_tracked_path(tmp_path: Path):
     """Em NTFS/macOS o disco resolve `docs/operacao.md` para o arquivo de outra
     caixa e a citacao quebrada passa. O arquivo solto no disco simula o que um
