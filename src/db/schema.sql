@@ -123,6 +123,9 @@ BEGIN
     END IF;
     RETURN NULL;
 END $$;
+-- Sem EXECUTE para PUBLIC (herdado por leia_api/leia_readonly): qualquer papel com TEMP no
+-- banco forjaria entradas indeletaveis no historico via tabela temporaria + gatilho proprio.
+REVOKE ALL ON FUNCTION domain_history_log() FROM PUBLIC;
 
 CREATE OR REPLACE FUNCTION forbid_change() RETURNS trigger
 LANGUAGE plpgsql AS $$
@@ -130,6 +133,7 @@ BEGIN
     RAISE EXCEPTION '% on % is not allowed (append-only / audited table)', TG_OP, TG_TABLE_NAME
         USING ERRCODE = 'insufficient_privilege';
 END $$;
+REVOKE ALL ON FUNCTION forbid_change() FROM PUBLIC;
 
 DO $$
 DECLARE t TEXT;
@@ -235,6 +239,7 @@ BEGIN
 END $$;
 CREATE OR REPLACE TRIGGER analyses_guard BEFORE UPDATE OR DELETE ON analyses
     FOR EACH ROW EXECUTE FUNCTION analyses_guard();
+REVOKE ALL ON FUNCTION analyses_guard() FROM PUBLIC;
 CREATE OR REPLACE TRIGGER analyses_no_truncate
     BEFORE TRUNCATE ON analyses FOR EACH STATEMENT EXECUTE FUNCTION forbid_change();
 
@@ -273,8 +278,8 @@ GRANT USAGE ON SEQUENCE minuta_types_id_seq, themes_id_seq, risk_matrix_id_seq, 
 
 -- ---------------------------------------------------------------- papeis minimos (VIT-22)
 -- leia_api: o que a API grava e le. A matriz e so leitura (quem edita e o admin, com leia_app);
--- a analise e o unico caminho de escrita: INSERT da linha, UPDATE do termino (gatilho
--- analyses_guard congela o resto) e INSERT da trilha, que e append-only por gatilho.
+-- a analise e o unico caminho de escrita: INSERT da linha, UPDATE do termino (grants por coluna
+-- + gatilho analyses_guard congelam o resto) e INSERT da trilha, que e append-only por gatilho.
 -- leia_readonly: leitura do dominio inteiro, sem nenhuma escrita. Logins pessoais recebem
 -- um destes papeis (GRANT leia_api TO api_login); sao NOLOGIN de proposito.
 DO $$
@@ -286,10 +291,20 @@ BEGIN
         CREATE ROLE leia_readonly NOLOGIN;  -- papel de consulta, sem escrita
     END IF;
 END $$;
+-- Convergencia, nao acumulacao: revoga antes de conceder, para um init em banco existente
+-- remover grant excedente de versao anterior. So as tabelas e sequencias da Leia; o banco do
+-- homelab e compartilhado com o Directus (directus_* intocadas).
+REVOKE ALL ON TABLE minuta_types, themes, risk_matrix, prompts, domain_history, data_versions,
+    analyses, analysis_trail, kb_docs, kb_chunks FROM leia_api, leia_readonly;
+REVOKE ALL ON SEQUENCE minuta_types_id_seq, themes_id_seq, risk_matrix_id_seq, prompts_id_seq,
+    analysis_trail_id_seq FROM leia_api, leia_readonly;
 GRANT USAGE ON SCHEMA public TO leia_api, leia_readonly;
 GRANT SELECT ON minuta_types, themes, risk_matrix, prompts, domain_history,
     kb_docs, kb_chunks TO leia_api;
-GRANT SELECT, INSERT, UPDATE ON analyses TO leia_api;        -- UPDATE so do termino; o gatilho guarda o snapshot
+GRANT SELECT, INSERT ON analyses TO leia_api;
+-- UPDATE so das colunas que o termino toca (finish/fail em src/db/analyses.py): coluna nova
+-- nasce bloqueada para a API, alem do gatilho analyses_guard.
+GRANT UPDATE (status, minuta_type, report, finished_at) ON analyses TO leia_api;
 GRANT SELECT, INSERT ON analysis_trail TO leia_api;          -- sem UPDATE/DELETE: trilha append-only
 GRANT USAGE ON SEQUENCE analysis_trail_id_seq TO leia_api;
 GRANT SELECT ON minuta_types, themes, risk_matrix, prompts, domain_history, data_versions,

@@ -157,7 +157,7 @@ papel por `GRANT`. Testado em `tests/test_db_roles.py`.
 |---|---|---|
 | `leia` (login) | tudo: é o dono das tabelas, roda `init`, aplica versões de dado | operação |
 | `leia_app` | escrita na matriz e no corpus, leitura do histórico; em `analyses` sem `DELETE`, em `analysis_trail` sem `UPDATE`/`DELETE` | `django_login` (admin) |
-| `leia_api` | leitura da matriz e do corpus; em `analyses` só `INSERT`/`SELECT`/`UPDATE` (o `UPDATE` é só o término — o gatilho `analyses_guard` congela o resto), em `analysis_trail` só `INSERT`/`SELECT` | `api_login` (API) |
+| `leia_api` | leitura da matriz e do corpus; em `analyses` só `INSERT`/`SELECT` e `UPDATE` **das colunas do término** (`status`, `minuta_type`, `report`, `finished_at` — coluna nova nasce bloqueada), em `analysis_trail` só `INSERT`/`SELECT` | `api_login` (API) |
 | `leia_readonly` | `SELECT` nas tabelas do domínio, nada mais | consultas |
 
 Deploy no CT 116 (roda **após o merge**, com o ok do dono — D2): nada de novo no dia a dia, o `init`
@@ -168,8 +168,23 @@ do commit novo cria os papeis e os grants. Só o `api_login` muda de papel:
 # 2. troca do papel do login da API (uma linha, reversivel):
 ssh pve "pct exec 116 -- docker exec leia-lab-postgres psql -U leia -d leia_lab \
   -c 'GRANT leia_api TO api_login; REVOKE leia_app FROM api_login;'"
-# 3. docker compose restart api (recria as conexoes com o papel novo)
+# 3. restart da API, para recriar as conexoes com o papel novo:
+ssh pve "pct exec 116 -- docker compose -f /root/leia/docker-compose.yml restart api"
 ```
+
+Checagem pós-troca (esperado: `edita_matriz = f`, `cria_analise = t`, e o `curl` sem erro):
+
+```bash
+ssh pve "pct exec 116 -- docker exec leia-lab-postgres psql -U leia -d leia_lab \
+  -c \"SELECT has_table_privilege('api_login', 'risk_matrix', 'UPDATE') AS edita_matriz, \
+has_table_privilege('api_login', 'analyses', 'INSERT') AS cria_analise;\""
+curl -sf https://leia-api.rauvbr.com/healthz
+```
+
+Banco migrado de PG ≤ 14 (não criado do zero no ≥ 15): conferir também que `PUBLIC` não tem
+`CREATE` no schema `public` (`SELECT nspacl FROM pg_namespace WHERE nspname = 'public'`; em PG
+17 criado do zero já não tem). Se ainda tiver: `REVOKE CREATE ON SCHEMA public FROM PUBLIC;` —
+sem isso qualquer login cria tabela no espaço da Leia.
 
 O `django_login` continua em `leia_app`, o papel que edita a matriz. Para dar a alguém só leitura:
 `GRANT leia_readonly TO <login>`.

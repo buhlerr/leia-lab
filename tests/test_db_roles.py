@@ -38,7 +38,7 @@ READONLY_TABLES = [*DOMAIN_READ_TABLES, "data_versions", "analyses", "analysis_t
 ALL_PRIVILEGES = ["SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER"]
 
 API_GRANTS = {t: {"SELECT"} for t in DOMAIN_READ_TABLES} | {
-    "analyses": {"SELECT", "INSERT", "UPDATE"},
+    "analyses": {"SELECT", "INSERT"},  # UPDATE e por coluna, so as do termino
     "analysis_trail": {"SELECT", "INSERT"},
 }
 
@@ -190,11 +190,11 @@ async def test_leia_readonly_cannot_write_anything(dpool, sql):
             await conn.execute("RESET ROLE")
 
 
-# ---------------------------------------------------------------- funcoes guardias (revisao PR 55)
+# ---------------------------------------------------------------- guardias e convergencia
 
 
 async def test_guard_functions_stay_with_the_owner_and_the_matrix_trigger_still_logs(dpool):
-    """MED 1: nem PUBLIC nem os papeis minimos executam os guardioes; o caminho legitimo segue."""
+    """Nem PUBLIC nem os papeis minimos executam os guardioes; o gatilho legitimo segue logando."""
     for fn in GUARD_FUNCTIONS:
         for role in ("public", API_ROLE, READONLY_ROLE):
             assert not await dpool.fetchval(
@@ -213,7 +213,7 @@ async def test_guard_functions_stay_with_the_owner_and_the_matrix_trigger_still_
 
 @pytest.mark.parametrize("role", [API_ROLE, READONLY_ROLE])
 async def test_minimal_roles_cannot_forge_domain_history_with_a_temp_table(dpool, role):
-    """MED 1: TEMP TABLE + gatilho chamando domain_history_log() e negado na criacao do gatilho."""
+    """TEMP TABLE + gatilho chamando domain_history_log() e negado na criacao do gatilho."""
     async with dpool.acquire() as conn:
         await conn.execute(f"SET ROLE {role}")
         try:
@@ -229,7 +229,7 @@ async def test_minimal_roles_cannot_forge_domain_history_with_a_temp_table(dpool
 
 
 async def test_init_db_converges_by_revoking_excess_grants(dpool):
-    """MED 2: init converge, nao acumula: grant excedente de versao anterior nao sobrevive."""
+    """init converge, nao acumula: grant excedente de versao anterior nao sobrevive."""
     await dpool.execute(f"GRANT DELETE ON risk_matrix TO {API_ROLE}")
     await dpool.execute(f"GRANT USAGE ON SEQUENCE minuta_types_id_seq TO {READONLY_ROLE}")
     await init_db(dpool)
@@ -241,7 +241,7 @@ async def test_init_db_converges_by_revoking_excess_grants(dpool):
 
 
 async def test_leia_api_updates_only_the_columns_of_the_finish(dpool):
-    """LOW 1: UPDATE de analyses e por coluna; fora do termino, negado pelo grant, antes do gatilho."""
+    """UPDATE de analyses e por coluna; fora do termino, negado pelo grant, antes do gatilho."""
     await _seed_row(dpool)
     analysis_id = await dpool.fetchval("SELECT id FROM analyses LIMIT 1")
     for col in FINISH_COLUMNS:
@@ -266,7 +266,7 @@ async def test_leia_api_updates_only_the_columns_of_the_finish(dpool):
 
 @pytest.mark.parametrize("role", [API_ROLE, READONLY_ROLE])
 async def test_minimal_roles_cannot_create_or_drop_tables_in_public(dpool, role):
-    """LOW 4: o papel nao cria nem derruba tabela no espaco da Leia."""
+    """O papel nao cria nem derruba tabela no espaco da Leia."""
     async with dpool.acquire() as conn:
         await conn.execute(f"SET ROLE {role}")
         try:
@@ -279,7 +279,7 @@ async def test_minimal_roles_cannot_create_or_drop_tables_in_public(dpool, role)
 
 
 async def test_reinit_keeps_third_party_tables_and_stays_idempotent(pool):
-    """LOW 4: init duas vezes com os papeis minimos; tabelas de terceiros (directus_*) intocadas."""
+    """init duas vezes com os papeis minimos; tabelas de terceiros (directus_*) intocadas."""
     await pool.execute("CREATE TABLE directus_users (id INT PRIMARY KEY, email TEXT)")
     await pool.execute("INSERT INTO directus_users VALUES (1, 'alguem@exemplo.invalid')")
     await init_db(pool)

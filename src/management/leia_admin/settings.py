@@ -12,8 +12,9 @@ Variaveis de ambiente:
   proxy): o Django confia no ``X-Forwarded-Proto`` e os cookies de sessao/CSRF viram ``Secure``.
   So ligue com a porta do admin fechada para tudo que nao seja o proxy (o cabecalho e forjavel).
 * ``LEIA_API_URL``/``LEIA_API_TOKEN``: a API que roda a analise. A pagina "Nova analise" envia o
-  arquivo pelo servidor; o login do admin nao escreve em ``analyses`` (grant + gatilho), quem
-  escreve e a API com o token de servico.
+  arquivo pelo servidor; quem escreve em ``analyses`` e a API, com o login proprio dela
+  (``api_login``, papel ``leia_api``). O login do admin nao escreve por abstencao do proprio
+  admin, nao por grant: ``leia_app`` ainda tem INSERT/UPDATE em ``analyses``.
 * ``LEIA_MLFLOW_URL``: MLflow interno para achar o trace de uma analise (vazio = sem trace).
   ``LEIA_MLFLOW_PUBLIC_URL``: o mesmo MLflow pelo endereco que o navegador alcanca (link do trace).
   ``MLFLOW_EXPERIMENT_NAME``: experimento onde a API grava os traces (padrao ``leia-lab``).
