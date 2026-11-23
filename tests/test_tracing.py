@@ -182,6 +182,7 @@ async def test_find_trace_acha_o_traco_tagueado_na_captura(seeded, settings, cap
 
 @pytest.mark.skipif(not os.environ.get("LEIA_MINUTAS_DIR"), reason="minutas mascaradas locais nao configuradas")
 async def test_gold_run_compares_two_matrix_versions(seeded, settings):
+    """Desativar o risco dominante muda o conjunto detectado e a matrix_version."""
     from src.cli import gold_compare, gold_run
     from src.eval.gold import minutas_dir
 
@@ -190,9 +191,13 @@ async def test_gold_run_compares_two_matrix_versions(seeded, settings):
     v2 = await gold_run(seeded, settings, minutas_dir())
 
     assert v1["matrix_version"] != v2["matrix_version"] and v1["prompt_version"] == v2["prompt_version"]
+    # o Jev offline marca o primeiro risco ativo de cada tema em toda clausula, entao fp nao
+    # muda com a matriz: constante por construcao, nao e comportamento observavel
     cmp = await gold_compare(seeded, v1["analyses"], v2["analyses"])
-    assert cmp["b"]["fp"] < cmp["a"]["fp"]  # o Jev offline marca R-04 em toda clausula; tira-lo remove esses FP
-    assert cmp["changed_clauses"] and set(cmp["delta"]) == {"precision", "recall", "f1"}
+    det_a = {rid for clause in cmp["a"]["per_clause"].values() for rid in clause["detected"]}
+    det_b = {rid for clause in cmp["b"]["per_clause"].values() for rid in clause["detected"]}
+    assert "R-04" in det_a and "R-04" not in det_b
+    assert cmp["changed_clauses"]
     # a rodada antiga, re-pontuada depois da mudanca, continua igual: vem de analyses, nao da matriz atual
     assert (await gold_compare(seeded, v1["analyses"], v1["analyses"]))["a"] == v1["score"]
 
