@@ -181,8 +181,17 @@ CREATE TABLE IF NOT EXISTS analyses (
     idempotency_key TEXT                        -- header Idempotency-Key do POST da API; NULL na CLI
 );
 -- Uma analise por chave: o INSERT do retry vira ON CONFLICT DO NOTHING. Banco anterior a coluna a
--- ganha vazia (linhas antigas sem chave).
-ALTER TABLE analyses ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+-- ganha vazia (linhas antigas sem chave). O ALTER so roda se faltar: ADD COLUMN IF NOT EXISTS pediria
+-- ACCESS EXCLUSIVE em analyses a cada init, mesmo sem nada a fazer.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_attribute
+        WHERE attrelid = 'analyses'::regclass AND attname = 'idempotency_key' AND NOT attisdropped
+    ) THEN
+        ALTER TABLE analyses ADD COLUMN idempotency_key TEXT;
+    END IF;
+END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS analyses_idempotency_key ON analyses (idempotency_key);
 -- Ciclo de vida: running -> done | unsupported | failed. Status fora do ciclo em banco legado e
 -- normalizado para 'failed' (valor original no report) ANTES do CHECK; o CHECK em si so e criado
