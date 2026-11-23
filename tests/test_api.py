@@ -624,3 +624,26 @@ async def test_post_chunked_oversized_stops_reading_at_limit(pool, api_settings)
     assert status == 413
     assert json.loads(body)["code"] == "document_too_large"
     assert bytes_read < 40 * 1024 * 1024
+
+
+async def test_evaluate_text_rejects_unbounded_str() -> None:
+    from src.api.service import evaluate_text
+
+    with pytest.raises(TypeError, match="BoundedText"):
+        await evaluate_text(None, None, text="texto sem passar por extract", filename="a.txt", idempotency_key="k")  # type: ignore[arg-type]
+
+
+async def test_post_invalid_content_length_returns_400_without_reading_body(pool, api_settings) -> None:
+    headers = [
+        (b"authorization", f"Bearer {TOKEN}".encode()),
+        (b"idempotency-key", str(uuid.uuid4()).encode()),
+        (b"content-type", b"multipart/form-data; boundary=leia-bound"),
+        (b"content-length", b"nao-e-numero"),
+    ]
+    app = create_app(api_settings)
+    async with app.router.lifespan_context(app):
+        status, body, bytes_read = await _asgi_post_analyses(app, headers=headers, chunks=[b"payload"])
+
+    assert status == 400
+    assert json.loads(body)["code"] == "invalid_content_length"
+    assert bytes_read == 0

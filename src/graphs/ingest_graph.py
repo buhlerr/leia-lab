@@ -19,12 +19,13 @@ import asyncpg
 from langgraph.graph import END, START, StateGraph
 
 from src.config import Settings
-from src.ingest.isolated import extract_text_isolated
+from src.ingest.extract import BoundedText, extract, require_bounded
 from src.ingest.masking import MaskedText, mask_personal_data, require_masked, resolve_doc_alias, split_contract_text
 from src.rag.embeddings import embed_text
 from src.rag.hybrid_search import _to_pgvector_literal
 
 _EMPTY_TEXT_MSG = "text must be a non-empty string"
+_INGEST_TEXT_EXTENSIONS = frozenset({".txt", ".md"})
 
 
 class IngestState(TypedDict, total=False):
@@ -39,10 +40,8 @@ class IngestState(TypedDict, total=False):
     chunks_indexed: int
 
 
-def _read_path(path: Path) -> str:
-    if path.suffix.lower() in {".pdf", ".docx"}:
-        return extract_text_isolated(path.suffix, path.read_bytes())
-    return path.read_text(encoding="utf-8")
+def _read_path(path: Path) -> BoundedText:
+    return extract(path, isolated=True, text_extensions=_INGEST_TEXT_EXTENSIONS)
 
 
 async def prepare_ingest_input(
@@ -63,7 +62,7 @@ async def prepare_ingest_input(
     text = raw_text
     if text is None and file_path is not None:
         path = Path(file_path)
-        text = await asyncio.to_thread(_read_path, path)
+        text = require_bounded(await asyncio.to_thread(_read_path, path), what="prepare_ingest_input")
         filename = filename or path.name
     if not isinstance(text, str) or not text.strip():
         raise ValueError(_EMPTY_TEXT_MSG)

@@ -29,21 +29,26 @@ from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
 import asyncpg
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, FastAPI, File, Header, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
+from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.types import Message, Receive, Scope, Send
 
 from src.api.schemas import AnalysisResult
 from src.api.service import AnalysisNotReplayable, evaluate_upload, load_analysis
 from src.config import Settings
 from src.db.analyses import AnalysisKeyTaken
 from src.graphs.analyze_minuta_graph import build_analyze_minuta_graph
-from src.ingest.extract import MAX_UPLOAD_BYTES, DocumentError
+from src.ingest import extract as extract_mod
+from src.ingest.extract import DocumentError, DocumentTooLargeError
 from src.tracing import mlflow_configured, mlflow_request, use_short_mlflow_http
 
 _log = logging.getLogger(__name__)
 
 _401_BODY = {"code": "unauthorized", "message": "Token de servico ausente ou invalido."}
+_MULTIPART_OVERHEAD_BYTES = 64 * 1024
 _409_KEY_REUSED = {
     "code": "idempotency_key_reused",
     "message": "Esta Idempotency-Key ja foi usada para outro documento.",
@@ -94,13 +99,60 @@ async def run_disconnect_guarded(work: Any, request: Request) -> Any:
     raise ClientDisconnected()
 
 
+def _verify_bearer(authorization: str | None, expected: str) -> None:
+    scheme, _, supplied = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not hmac.compare_digest(supplied.encode(), expected.encode()):
+        raise HTTPException(status_code=401, detail=_401_BODY)
+
+
+def _too_large_http_error() -> HTTPException:
+    return HTTPException(
+        status_code=DocumentTooLargeError.http_status,
+        detail={"code": DocumentTooLargeError.code, "message": DocumentTooLargeError.public_message},
+    )
+
+
+def _protected_route_class(expected: str) -> type[APIRoute]:
+    class ProtectedRoute(APIRoute):
+        async def handle(self, scope: Scope, receive: Receive, send: Send) -> None:
+            headers = Headers(scope=scope)
+            _verify_bearer(headers.get("authorization"), expected)
+
+            max_body_bytes = extract_mod.MAX_UPLOAD_BYTES + _MULTIPART_OVERHEAD_BYTES
+            for raw_length in headers.getlist("content-length"):
+                try:
+                    content_length = int(raw_length)
+                except ValueError:
+                    content_length = -1
+                if content_length < 0:
+                    raise HTTPException(
+                        status_code=400,
+                        detail={"code": "invalid_content_length", "message": "Cabecalho Content-Length invalido."},
+                    )
+                if content_length > max_body_bytes:
+                    raise _too_large_http_error()
+
+            received = 0
+
+            async def bounded_receive() -> Message:
+                nonlocal received
+                message = await receive()
+                if message.get("type") == "http.request":
+                    received += len(message.get("body", b""))
+                    if received > max_body_bytes:
+                        raise _too_large_http_error()
+                return message
+
+            await super().handle(scope, bounded_receive, send)
+
+    return ProtectedRoute
+
+
 def _require_token_factory(expected: str) -> Any:
     """Dependencia de auth: comparacao em tempo constante, 401 caso contrario."""
 
     async def require_token(authorization: Annotated[str | None, Header()] = None) -> None:
-        scheme, _, supplied = (authorization or "").partition(" ")
-        if scheme.lower() != "bearer" or not hmac.compare_digest(supplied.encode(), expected.encode()):
-            raise HTTPException(status_code=401, detail=_401_BODY)
+        _verify_bearer(authorization, expected)
 
     return require_token
 
@@ -145,6 +197,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(title="leia-lab API", version="1", lifespan=lifespan)
     require_token = Depends(_require_token_factory(cfg.LEIA_API_TOKEN))
+    v1 = APIRouter(route_class=_protected_route_class(cfg.LEIA_API_TOKEN), dependencies=[require_token])
 
     @app.exception_handler(StarletteHTTPException)
     async def _http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
@@ -168,12 +221,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             status_code=409, content={"code": code, "message": message, "analysis_id": str(exc.analysis_id)}
         )
 
-    @app.post(
+    @v1.post(
         "/v1/analyses",
         status_code=201,
         response_model=AnalysisResult,
         summary="Avalia um contrato enviado como arquivo",
-        dependencies=[require_token],
         responses={
             200: {"description": "Retry: a analise terminada desta chave"},
             409: {
@@ -197,9 +249,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request,
         response: Response,
     ) -> AnalysisResult:
-        # Le no maximo um byte alem do teto: o nucleo recusa sem carregar o resto.
-        data = await file.read(MAX_UPLOAD_BYTES + 1)
-        # Traco MLflow so quando ele subiu junto; o nucleo (service.py) segue sem rastreio.
+        data = await file.read(extract_mod.MAX_UPLOAD_BYTES + 1)
         with mlflow_request() if app.state.mlflow_on else contextlib.nullcontext():
             try:
                 result, created = await run_disconnect_guarded(
@@ -221,17 +271,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             response.status_code = 200
         return result
 
-    @app.get(
+    @v1.get(
         "/v1/analyses/{analysis_id}",
         response_model=AnalysisResult,
         summary="Recupera uma analise pelo id (report + trilha)",
-        dependencies=[require_token],
     )
     async def get_analysis(analysis_id: uuid.UUID) -> AnalysisResult:
         result = await load_analysis(app.state.pool, analysis_id)
         if result is None:
             raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Analise inexistente."})
         return result
+
+    app.include_router(v1)
 
     @app.get("/healthz", summary="Sonda de vida (sem autenticacao)")
     async def healthz() -> dict[str, str]:

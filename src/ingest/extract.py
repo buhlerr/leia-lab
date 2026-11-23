@@ -1,9 +1,10 @@
-"""Text extraction for draft documents uploaded as PDF or DOCX.
+"""Text extraction for draft documents (PDF, DOCX and plain text).
 
-The format is chosen from ``filename``'s extension, case-insensitively. Read
-failures are normalized into :class:`DocumentError` subclasses so callers can
-distinguish unsupported formats, unreadable files and documents with no text
-(for example scanned PDFs) without inspecting library-specific exceptions.
+All callers go through :func:`extract`, which enforces byte and character limits
+and returns :class:`BoundedText`. Read failures are normalized into
+:class:`DocumentError` subclasses so callers can distinguish unsupported formats,
+unreadable files and documents with no text without inspecting library-specific
+exceptions.
 """
 
 from __future__ import annotations
@@ -11,6 +12,9 @@ from __future__ import annotations
 import io
 import os
 import zipfile
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
 
 import docx
 import pypdf
@@ -26,6 +30,38 @@ MAX_TEXT_CHARS = 200_000
 # Limitam a memoria de um PDF com muitas streams infladas.
 MAX_PDF_PAGES = 500
 MAX_PDF_STREAM_BYTES = 8_000_000
+
+_BINARY_EXTENSIONS = frozenset({".pdf", ".docx"})
+DEFAULT_TEXT_EXTENSIONS = frozenset({".txt"})
+_KEY = object()
+
+
+class BoundedText(str):
+    """Texto extraido com tamanho ja verificado (``<= MAX_TEXT_CHARS``).
+
+    So este modulo cria instancias; fatiar ou concatenar devolve ``str`` comum.
+    """
+
+    __slots__ = ()
+
+    def __new__(cls, value: str, *, _key: object = None) -> BoundedText:
+        if _key is not _KEY:
+            raise TypeError("BoundedText is created only by src.ingest.extract; pass input through extract()")
+        return super().__new__(cls, value)
+
+    def __reduce__(self) -> tuple[Any, ...]:
+        return (_bounded, (str(self),))
+
+
+def _bounded(value: str) -> BoundedText:
+    return BoundedText(value, _key=_KEY)
+
+
+def require_bounded(value: object, *, what: str) -> BoundedText:
+    """Recusa qualquer valor que nao seja ``BoundedText``."""
+    if isinstance(value, BoundedText):
+        return value
+    raise TypeError(f"{what} requires BoundedText; pass input through src.ingest.extract.extract()")
 
 
 DOCUMENT_ERRORS: dict[str, type[DocumentError]] = {}
@@ -135,25 +171,102 @@ def _extract_docx(data: bytes) -> str:
     """
     document = docx.Document(io.BytesIO(data))
     blocks: list[str] = []
+    total = 0
     for block in document.iter_inner_content():
         if isinstance(block, Paragraph):
-            blocks.append(block.text)
+            lines = [block.text]
         else:
-            for row in block.rows:
-                blocks.append(" | ".join(cell.text for cell in row.cells))
+            lines = [" | ".join(cell.text for cell in row.cells) for row in block.rows]
+        for line in lines:
+            total += len(line)
+            if total > MAX_TEXT_CHARS:
+                raise DocumentTooLargeError(
+                    f"The document has more than {MAX_TEXT_CHARS} characters of text"
+                )
+            blocks.append(line)
     return "\n".join(blocks)
 
 
-def extract_text(filename: str, data: bytes) -> str:
+def _extract_txt(data: bytes) -> str:
+    if len(data) > MAX_TEXT_CHARS * 4:
+        raise DocumentTooLargeError(f"The document has more than {MAX_TEXT_CHARS} characters of text")
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise InvalidDocumentError("The file is not valid UTF-8") from exc
+
+
+def _bound(text: str) -> BoundedText:
+    if len(text) > MAX_TEXT_CHARS:
+        raise DocumentTooLargeError(f"The document has more than {MAX_TEXT_CHARS} characters of text")
+    stripped = text.strip()
+    if not stripped:
+        raise EmptyDocumentError("The document contains no extractable text")
+    return BoundedText(stripped, _key=_KEY)
+
+
+def _validate_extension(extension: str, text_extensions: frozenset[str]) -> None:
+    if extension not in _BINARY_EXTENSIONS and extension not in text_extensions:
+        raise UnsupportedFileError(f"Unsupported file extension: {extension or '<none>'}")
+
+
+def _read_bounded_bytes(path: Path, *, limit: int) -> bytes:
+    if path.stat().st_size > limit:
+        raise DocumentTooLargeError(f"The file is larger than {limit} bytes")
+    with path.open("rb") as fh:
+        data = fh.read(limit + 1)
+    if len(data) > limit:
+        raise DocumentTooLargeError(f"The file is larger than {limit} bytes")
+    return data
+
+
+def extract(
+    source: os.PathLike[str] | bytes,
+    *,
+    filename: str = "",
+    isolated: bool = False,
+    text_extensions: frozenset[str] = DEFAULT_TEXT_EXTENSIONS,
+    isolated_reader: Callable[[str, bytes], str] | None = None,
+) -> BoundedText:
+    """Extract plain text from a ``Path`` or ``bytes`` enforcing upload and char limits."""
+    if isinstance(source, os.PathLike):
+        path = Path(source)
+        extension = path.suffix.lower()
+        _validate_extension(extension, text_extensions)
+        limit = MAX_UPLOAD_BYTES if extension in _BINARY_EXTENSIONS else min(MAX_UPLOAD_BYTES, MAX_TEXT_CHARS * 4)
+        data = _read_bounded_bytes(path, limit=limit)
+    elif isinstance(source, (bytes, bytearray)):
+        extension = os.path.splitext(filename)[1].lower()
+        _validate_extension(extension, text_extensions)
+        if len(source) > MAX_UPLOAD_BYTES:
+            raise DocumentTooLargeError(f"The file is larger than {MAX_UPLOAD_BYTES} bytes")
+        data = bytes(source)
+    else:
+        raise TypeError(f"extract() expects Path or bytes, got {type(source).__name__}")
+
+    if extension in _BINARY_EXTENSIONS:
+        if isolated:
+            reader = isolated_reader
+            if reader is None:
+                from src.ingest.isolated import extract_text_isolated
+
+                reader = extract_text_isolated
+            return _bound(reader(extension, data))
+        return extract_by_extension(extension, data)
+
+    return _bound(_extract_txt(data))
+
+
+def extract_text(filename: str, data: bytes) -> BoundedText:
     """Extract plain text from ``data`` according to ``filename``'s extension."""
     return extract_by_extension(os.path.splitext(filename)[1], data)
 
 
-def extract_by_extension(extension: str, data: bytes) -> str:
+def extract_by_extension(extension: str, data: bytes) -> BoundedText:
     """Extract plain text from ``data`` read as ``extension`` (``.pdf`` or ``.docx``).
 
-    The result is stripped; an empty result raises :class:`EmptyDocumentError`.
-    Error messages never include document contents.
+    The result is stripped and length-checked; an empty result raises
+    :class:`EmptyDocumentError`. Error messages never include document contents.
     """
     extension = extension.lower()
 
@@ -176,7 +289,4 @@ def extract_by_extension(extension: str, data: bytes) -> str:
     except Exception as exc:
         raise InvalidDocumentError("Could not read the document") from exc
 
-    text = text.strip()
-    if not text:
-        raise EmptyDocumentError("The document contains no extractable text")
-    return text
+    return _bound(text)
