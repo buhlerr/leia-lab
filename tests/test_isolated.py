@@ -11,7 +11,7 @@ import pytest
 
 from src.graphs.ingest_graph import _read_path
 from src.ingest.extract import (
-    DocumentTooLargeError,
+    DocumentTimeoutError,
     InvalidDocumentError,
     UnsupportedFileError,
 )
@@ -28,24 +28,24 @@ def _docx_with_text(text: str) -> bytes:
 
 
 def test_extract_isolated_reads_a_docx_in_a_separate_process():
-    text = extract_text_isolated("minuta.docx", _docx_with_text("Clausula primeira"))
+    text = extract_text_isolated(".docx", _docx_with_text("Clausula primeira"))
 
     assert "Clausula primeira" in text
 
 
 def test_extract_isolated_rejects_unsupported_extension():
     with pytest.raises(UnsupportedFileError):
-        extract_text_isolated("minuta.txt", b"texto qualquer")
+        extract_text_isolated(".txt", b"texto qualquer")
 
 
-def test_extract_isolated_reports_a_timeout_as_too_large(monkeypatch: pytest.MonkeyPatch):
-    def _timeout(*args, **kwargs):
-        raise subprocess.TimeoutExpired(cmd="x", timeout=1)
+def test_extract_isolated_reports_a_timeout_as_a_timeout():
+    with pytest.raises(DocumentTimeoutError):
+        extract_text_isolated(".docx", _docx_with_text("Clausula primeira"), timeout_s=0.001)
 
-    monkeypatch.setattr("src.ingest.isolated.subprocess.run", _timeout)
 
-    with pytest.raises(DocumentTooLargeError):
-        extract_text_isolated("minuta.docx", b"qualquer")
+def test_extract_isolated_refuses_a_real_filename():
+    with pytest.raises(ValueError, match="extensao"):
+        extract_text_isolated("contrato-joao-da-silva.docx", _docx_with_text("Clausula primeira"))
 
 
 def test_extract_isolated_rejects_a_failed_process(monkeypatch: pytest.MonkeyPatch):
@@ -57,7 +57,7 @@ def test_extract_isolated_rejects_a_failed_process(monkeypatch: pytest.MonkeyPat
     )
 
     with pytest.raises(InvalidDocumentError):
-        extract_text_isolated("minuta.docx", b"qualquer")
+        extract_text_isolated(".docx", b"qualquer")
 
 
 def test_read_path_extracts_docx_with_table(tmp_path: Path):

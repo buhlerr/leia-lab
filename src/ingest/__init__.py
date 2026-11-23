@@ -1,5 +1,6 @@
 from src.ingest.extract import (
     DocumentError,
+    DocumentTimeoutError,
     DocumentTooLargeError,
     EmptyDocumentError,
     InvalidDocumentError,
@@ -11,6 +12,7 @@ from src.ingest.masking import mask_personal_data, resolve_doc_alias, split_cont
 
 __all__ = [
     "DocumentError",
+    "DocumentTimeoutError",
     "DocumentTooLargeError",
     "EmptyDocumentError",
     "InvalidDocumentError",
