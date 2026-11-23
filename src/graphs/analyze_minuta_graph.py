@@ -54,12 +54,7 @@ _EXCERPT = 200  # caracteres do texto MASCARADO da clausula guardados na trilha
 
 @dataclass
 class CostBudget:
-    """Teto de gasto (US$) das chamadas de chat de uma analise.
-
-    A checagem acontece DEPOIS de adquirir o semaforo de concorrencia, na hora da
-    chamada HTTP: todas as corotinas do redator sao criadas de uma vez pelo gather,
-    e conferir na criacao deixaria todas passarem.
-    """
+    """Teto de gasto (US$) das chamadas de chat de uma analise; pode estourar so pelas chamadas em voo."""
 
     limit_usd: float
     spent_usd: float = 0.0
@@ -73,7 +68,7 @@ class CostBudget:
 
 
 class BudgetExhausted(Exception):
-    """Clause writing skipped: the analysis cost cap (ANALYSIS_MAX_COST_USD) was reached."""
+    """A redacao da clausula foi pulada: o teto ANALYSIS_MAX_COST_USD foi atingido."""
 
 
 # Criterios das perguntas ao Jev. As INSTRUCOES vem da tabela prompts; os criterios ainda sao codigo.
@@ -217,8 +212,7 @@ def build_analyze_minuta_graph(
 
     async def llm(system: str, user: str, budget: CostBudget, model: str | None = None) -> ChatResult:
         use = cfg.model_copy(update={"CHAT_MODEL": model}) if model else cfg
-        # Checagem DEPOIS do semaforo: o gather cria todas as corotinas de uma vez,
-        # e conferir antes deixaria todas as chamadas em andamento passarem.
+        # Checa depois do semaforo: o gather cria todas as corotinas de uma vez.
         async with _limiter():
             if budget.exhausted:
                 raise BudgetExhausted
@@ -553,7 +547,7 @@ def build_analyze_minuta_graph(
         budget = CostBudget(cfg.ANALYSIS_MAX_COST_USD)
         chat_model = redator.get("model") or cfg.CHAT_MODEL
 
-        async def redigir_um(cl: dict[str, Any]) -> dict[str, Any] | None:
+        async def redigir_um(cl: dict[str, Any]) -> tuple[dict[str, Any], str, int] | None:
             riscos_txt = "\n".join(f"- {x['id']}: {x['risco']}" for x in cl["confirmados"])
             normas_txt = "\n".join(f"- {n['citacao']}: {n['texto']}" for n in cl["normas"]) or "(nenhuma)"
             msg = (
