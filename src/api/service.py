@@ -31,6 +31,18 @@ from src.ingest.isolated import extract_text_isolated
 # Extensoes que podem ser patologicas: extracao em processo separado.
 _ISOLATED_EXTENSIONS = frozenset({".pdf", ".docx"})
 
+# Status com resultado pronto: so estes o retry devolve.
+_REPLAYABLE = frozenset({"done", "unsupported"})
+
+
+class AnalysisNotReplayable(Exception):
+    """A chave ja nomeia uma analise sem resultado para devolver: ``status`` e 'running' ou 'failed'."""
+
+    def __init__(self, analysis_id: uuid.UUID, status: str) -> None:
+        super().__init__(f"{analysis_id} is {status}")
+        self.analysis_id = analysis_id
+        self.status = status
+
 
 def _decode(value: Any) -> Any:
     """asyncpg devolve JSONB como ``str``; o contrato quer objetos."""
@@ -62,7 +74,8 @@ async def evaluate_upload(
 
     POST e GET devolvem o mesmo contrato: o resultado e re-lido do banco (``load_analysis``),
     exatamente como o GET fara depois. Chave ja usada para a mesma entrada devolve a analise
-    dela (talvez ainda 'running') sem rodar de novo; para outra entrada, ``AnalysisKeyTaken`` sobe.
+    terminada dela sem rodar de novo, ou levanta ``AnalysisNotReplayable`` se ela ainda roda ou
+    falhou; para outra entrada, ``AnalysisKeyTaken`` sobe.
     """
     text = await _extract_text(filename, data)
     if not text.strip():
@@ -78,6 +91,8 @@ async def evaluate_upload(
     result = await load_analysis(pool, analysis_id)
     if result is None:  # a linha existe: a execucao ou a chave acabaram de apontar para ela
         raise RuntimeError("analysis row not found after a completed run")  # pragma: no cover
+    if not created and result["status"] not in _REPLAYABLE:
+        raise AnalysisNotReplayable(analysis_id, result["status"])
     return result, created
 
 
