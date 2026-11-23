@@ -60,6 +60,8 @@ def _check(types: dict[str, dict[str, Any]]) -> None:
         missing = [k for k in REQUIRED_PROMPTS if k not in t["prompts"]]
         if missing:
             raise RulesConfigError(f"tipo {slug!r} sem prompt ativo: {', '.join(missing)}")
+        if "{risco}" not in t["prompts"]["confirmar_risco"]["text"]:
+            raise RulesConfigError(f"tipo {slug!r}: confirmar_risco sem o marcador {{risco}}")
 
 
 async def load_rules_snapshot(pool: asyncpg.Pool) -> RulesSnapshot:
@@ -81,8 +83,6 @@ async def load_rules_snapshot(pool: asyncpg.Pool) -> RulesSnapshot:
     theme_slug = {t["id"]: t["slug"] for t in themes}
     out: dict[str, Any] = {}
     for ty in types:
-        # Tema sem nenhum risco ativo fica de fora: nao ha o que confirmar nele (ex.: temas da
-        # matriz padrao depois que uma matriz versionada substitui os riscos).
         with_risk = {r["theme_id"] for r in risks}
         mine = [t for t in themes if t["minuta_type_id"] == ty["id"] and t["id"] in with_risk]
         mine_ids = {t["id"] for t in mine}
@@ -101,7 +101,7 @@ async def load_rules_snapshot(pool: asyncpg.Pool) -> RulesSnapshot:
         pr: dict[str, dict[str, Any]] = {}
         for p in prompts:
             if p["minuta_type_id"] == ty["id"]:
-                pr.setdefault(p["kind"], {"text": p["prompt_text"], "model": p["model"]})  # menor position vence
+                pr.setdefault(p["kind"], {"text": p["prompt_text"], "model": p["model"]})
         out[ty["slug"]] = {
             "name": ty["name"],
             "classifier": ty["classifier_description"],

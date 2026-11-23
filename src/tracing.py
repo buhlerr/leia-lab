@@ -48,8 +48,7 @@ from mlflow.tracing.provider import is_tracing_enabled
 
 _log = logging.getLogger(__name__)
 
-# Tag que amarra um traco (LangSmith ou MLflow) a uma analise: e o analysis_id da linha em
-# ``analyses``. Chave com ponto exige crases no filtro de busca do MLflow.
+# Chave com ponto exige crases no filtro de busca do MLflow.
 ANALYSIS_TAG = "leia.analysis_id"
 
 

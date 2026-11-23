@@ -63,7 +63,7 @@ _409_NOT_REPLAYABLE = {
         "A analise desta Idempotency-Key falhou; envie de novo com uma Idempotency-Key nova.",
     ),
 }
-_DISCONNECT_POLL = 0.5  # s entre sondas de desconexao
+_DISCONNECT_POLL = 0.5
 
 
 class ClientDisconnected(Exception):
@@ -92,7 +92,7 @@ async def run_disconnect_guarded(work: Any, request: Request) -> Any:
         with contextlib.suppress(asyncio.CancelledError):
             await watcher
     if task.done():
-        return task.result()  # levanta a excecao se work falhou
+        return task.result()
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await task
@@ -184,12 +184,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         pool = await asyncpg.create_pool(dsn=cfg.DATABASE_URL, min_size=1, max_size=4)
         app.state.pool = pool
-        # O grafo fecha sobre o pool: regras e trilha passam por ele.
         app.state.graph = build_analyze_minuta_graph(pool, cfg)
         app.state.mlflow_on = False
         try:
             with contextlib.ExitStack() as mlflow_stack:
-                if cfg.MLFLOW_TRACKING_URI:  # LangSmith fica fora da API: so o MLflow self-hosted
+                if cfg.MLFLOW_TRACKING_URI:
                     app.state.mlflow_on = await _start_mlflow(cfg, mlflow_stack)
                 yield
         finally:
@@ -201,13 +200,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(StarletteHTTPException)
     async def _http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
-        # Envelope unico de erro: {"code", "message"}, o mesmo dos DocumentError.
         detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
         return JSONResponse(status_code=exc.status_code, content=detail)
 
     @app.exception_handler(DocumentError)
     async def _document_error(request: Request, exc: DocumentError) -> JSONResponse:
-        # O corpo nunca ecoa o documento nem o nome real do arquivo: so o contrato da classe.
         return JSONResponse(status_code=exc.http_status, content={"code": exc.code, "message": exc.public_message})
 
     @app.exception_handler(AnalysisKeyTaken)

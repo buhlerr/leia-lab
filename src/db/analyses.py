@@ -102,8 +102,6 @@ async def finish_analysis(
         analysis_id,
         status,
         minuta_type,
-        # O banco e egresso (compartilhado com o Directus): o relatorio e mascarado AQUI,
-        # fail-safe, mesmo que um passo malcomportado monte texto cru. Idempotente no que ja e mascarado.
         json.dumps(mask_payload(report), ensure_ascii=False, default=str) if report is not None else None,
     )
 

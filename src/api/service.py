@@ -21,7 +21,6 @@ from src.graphs.analyze_minuta_graph import analyze
 from src.ingest.extract import BoundedText, extract, require_bounded
 from src.ingest.isolated import extract_text_isolated
 
-# Status com resultado pronto: so estes o retry devolve.
 _REPLAYABLE = frozenset({"done", "unsupported"})
 
 
@@ -59,7 +58,7 @@ async def evaluate_text(
     else:
         analysis_id, created = state["analysis_id"], True
     result = await load_analysis(pool, analysis_id)
-    if result is None:  # a linha existe: a execucao ou a chave acabaram de apontar para ela
+    if result is None:
         raise RuntimeError("analysis row not found after a completed run")  # pragma: no cover
     if not created and result["status"] not in _REPLAYABLE:
         raise AnalysisNotReplayable(analysis_id, result["status"])

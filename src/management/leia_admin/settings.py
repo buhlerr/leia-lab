@@ -27,7 +27,7 @@ from urllib.parse import unquote, urlparse
 
 from django.core.exceptions import ImproperlyConfigured
 
-BASE_DIR = Path(__file__).resolve().parents[1]  # src/management/
+BASE_DIR = Path(__file__).resolve().parents[1]
 
 DEBUG = os.environ.get("DJANGO_DEBUG", "false").lower() in ("1", "true", "yes")
 _TESTING = sys.argv[1:2] == ["test"]
@@ -125,10 +125,8 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# API da Leia (roda a analise) e MLflow (onde o trace dela fica). A pagina "Nova analise"
-# envia o arquivo pelo servidor com o token de servico; o trace e linkado no detalhe.
 LEIA_API_URL = os.environ.get("LEIA_API_URL", "http://leia-api:8080").rstrip("/")
 LEIA_API_TOKEN = os.environ.get("LEIA_API_TOKEN", "")
-LEIA_MLFLOW_URL = os.environ.get("LEIA_MLFLOW_URL", "")  # interno, para busca (vazio = sem trace)
+LEIA_MLFLOW_URL = os.environ.get("LEIA_MLFLOW_URL", "")
 LEIA_MLFLOW_PUBLIC_URL = os.environ.get("LEIA_MLFLOW_PUBLIC_URL", "https://mlflow.rauvbr.com").rstrip("/")
 MLFLOW_EXPERIMENT_NAME = os.environ.get("MLFLOW_EXPERIMENT_NAME", "leia-lab")

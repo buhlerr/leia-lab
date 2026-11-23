@@ -14,6 +14,6 @@ urlpatterns = [
     path("", RedirectView.as_view(url="/admin/", permanent=False)),
     path("admin/", admin.site.urls),
     path("ping/", lambda _r: JsonResponse({"ok": True})),
-    # gunicorn nao serve estaticos; volume baixo (uso interno) dispensa um servidor so para isso.
+    # gunicorn nao serve estaticos.
     path("static/<path:path>", static_serve, {"document_root": str(STATIC_ROOT)}),
 ]

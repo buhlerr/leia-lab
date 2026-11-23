@@ -19,7 +19,6 @@ import asyncpg
 from src.rag.embeddings import EMBEDDING_DIM
 
 DEFAULT_RRF_K = 60
-# Number of candidates each branch contributes before fusion.
 CANDIDATE_MULTIPLIER = 4
 MIN_CANDIDATES = 20
 

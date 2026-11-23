@@ -8,6 +8,7 @@ import asyncpg
 import pytest
 
 import src.graphs.analyze_minuta_graph as mod
+from src.clients.llm import ChatResult
 from src.db.connection import init_db
 from src.db.defaults import LOCACAO_RESIDENCIAL as LOCACAO
 from src.db.rules import RulesConfigError, load_rules_snapshot, verify_snapshot
@@ -153,6 +154,23 @@ async def test_prompts_edited_in_the_db_reach_the_next_run(seeded, settings, mon
     assert any(i.startswith("CONFIRMA ") and i.endswith("?") and "{risco}" not in i for i in jev_instr)
 
 
+async def test_prompt_model_null_uses_settings_and_non_null_overrides(seeded, settings, monkeypatch):
+    models: list[str] = []
+
+    async def spy_chat(system, user, s=None, **kw):
+        models.append(s.CHAT_MODEL)
+        return ChatResult('{"alertas": []}', 30, 0.0)
+
+    monkeypatch.setattr(mod, "chat_completion", spy_chat)
+    await _run(seeded, settings)
+    assert models and set(models) == {settings.CHAT_MODEL}
+
+    await _psql("UPDATE prompts SET model = 'modelo-custom' WHERE kind = 'redigir_system'")
+    models.clear()
+    await _run(seeded, settings)
+    assert models and set(models) == {"modelo-custom"}
+
+
 async def test_classifier_candidates_come_from_minuta_types(seeded, settings, monkeypatch):
     await seeded.execute(
         "INSERT INTO minuta_types (slug, name, classifier_description) "
@@ -187,6 +205,7 @@ async def test_classifier_candidates_come_from_minuta_types(seeded, settings, mo
         ("UPDATE prompts SET active = false WHERE kind = 'confirmar_risco'", "confirmar_risco"),
         ("DELETE FROM prompts WHERE kind = 'regula_norma'", "regula_norma"),
         ("UPDATE minuta_types SET active = false", "nenhum tipo"),
+        ("UPDATE prompts SET prompt_text = 'sem placeholder' WHERE kind = 'confirmar_risco'", r"\{risco\}"),
     ],
 )
 async def test_missing_rules_fail_before_any_external_call_or_analysis_row(seeded, settings, monkeypatch, setup, match):

@@ -15,7 +15,6 @@ Responda somente JSON: {"alertas": [{"id": "id do risco", "trecho": "copia liter
 Inclua um item para cada risco listado. "trecho" deve ser copiado caractere por caractere. Use "discorda": true apenas se a clausula claramente nao configurar o risco, sem remover o item. Nao cite artigo que nao esteja nas normas e nunca invente lei."""
 
 TRIAGEM_RISCO = "`clausula` e um trecho de contrato de locacao residencial. Ele merece analise juridica de risco?"
-# Template: {risco} e a descricao do risco da matriz.
 CONFIRMAR_RISCO = (
     "`clausula` e trecho de contrato de locacao e `ficha` traz dados do mesmo contrato. "
     "Considerando os dois, a clausula concretiza este risco: {risco}"

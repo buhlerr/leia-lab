@@ -33,7 +33,7 @@ from src.eval import gold as G
 from src.graphs.analyze_minuta_graph import analyze, build_analyze_minuta_graph
 from src.graphs.ingest_graph import build_ingest_graph, ingest
 
-RUNS_DIR = Path(".local") / "gold-runs"  # ignorado pelo git; so ids de analise
+RUNS_DIR = Path(".local") / "gold-runs"
 
 
 async def gold_run(pool: asyncpg.Pool, settings: Settings, minutas_dir: Path) -> dict[str, Any]:

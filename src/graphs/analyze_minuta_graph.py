@@ -57,8 +57,8 @@ from src.tracing import tag_analysis
 
 _EMPTY_TEXT_MSG = "text must be a non-empty string"
 _NO_ANALYSIS_ID_MSG = "graph input needs an 'analysis_id'; use analyze(), which owns the analyses row"
-_CONCURRENCY = 8  # teto PADRAO de chamadas externas (Jev, LLM, embeddings); o knob publico e max_concurrency
-_EXCERPT = 200  # caracteres do texto MASCARADO da clausula guardados na trilha
+_CONCURRENCY = 8
+_EXCERPT = 200
 
 
 @dataclass
@@ -80,7 +80,6 @@ class BudgetExhausted(Exception):
     """A redacao da clausula foi pulada: o teto ANALYSIS_MAX_COST_USD foi atingido."""
 
 
-# Criterios das perguntas ao Jev. As INSTRUCOES vem da tabela prompts; os criterios ainda sao codigo.
 _UNSUPPORTED = "Qualquer outro documento, como lei, codigo, parecer, contrato de outro tipo ou texto sem relacao."
 _Q_REGULA_CRITERIA = {
     "true": "O dispositivo trata especificamente do que a clausula regula.",
@@ -94,13 +93,12 @@ _NC = {"nao_consta": "O contrato nao informa isso, ou nenhuma opcao corresponde.
 
 
 class AnalyzeMinutaState(TypedDict, total=False):
-    # Sem raw_text / file_path / doc_name, de proposito (ver docstring do modulo).
-    filename: MaskedText  # apelido publico (documento-<sha8>.<ext>), nunca o nome real
+    filename: MaskedText
     text: MaskedText
     analysis_id: str
-    idempotency_key: str  # so a API manda; nomeia no maximo uma analise
-    rules: dict[str, Any]  # conteudo da foto das regras (sem dado pessoal)
-    rules_meta: dict[str, Any]  # hash, matrix_version, prompt_version, history_id
+    idempotency_key: str
+    rules: dict[str, Any]
+    rules_meta: dict[str, Any]
     tipo: str
     score_tipo: float
     suportado: bool
@@ -135,8 +133,6 @@ def _tokens(res: dict[str, Any]) -> int:
 
 
 async def _gather(coros: list[Any]) -> list[Any]:
-    # Sem limite proprio: o teto de concorrencia fica nas chamadas-folha (ver _limiter),
-    # senao fan-outs aninhados multiplicariam o limite ou travariam.
     return await asyncio.gather(*coros)
 
 
@@ -144,7 +140,6 @@ def _type_rules(state: AnalyzeMinutaState) -> dict[str, Any]:
     return state["rules"]["types"][state["tipo"]]
 
 
-# ---------------------------------------------------------------- entrada (fora do grafo)
 async def prepare_input(
     *, raw_text: str | None = None, file_path: str | Path | None = None, filename: str = "", doc_name: str = ""
 ) -> dict[str, MaskedText]:
@@ -187,7 +182,7 @@ class AnalyzeMinutaGraph:
 
 logger = logging.getLogger(__name__)
 
-_FAILURE_WRITE_TIMEOUT = 10.0  # s: banco travado nao pode segurar o cancelamento para sempre
+_FAILURE_WRITE_TIMEOUT = 10.0
 
 
 @asynccontextmanager
@@ -210,7 +205,7 @@ async def _owned_analysis(pool: asyncpg.Pool, inp: dict[str, str]) -> AsyncItera
         try:
             await asyncio.shield(write)
         except asyncio.CancelledError:
-            while not write.done():  # 2o..enesimo cancelamento: absorve ate a escrita terminar
+            while not write.done():
                 try:
                     await asyncio.shield(write)
                 except asyncio.CancelledError:
@@ -306,7 +301,6 @@ def build_analyze_minuta_graph(
 
     async def llm(system: str, user: str, budget: CostBudget, model: str | None = None) -> ChatResult:
         use = cfg.model_copy(update={"CHAT_MODEL": model}) if model else cfg
-        # Checa depois do semaforo: o gather cria todas as corotinas de uma vez.
         async with _limiter():
             if budget.exhausted:
                 raise BudgetExhausted
@@ -318,18 +312,15 @@ def build_analyze_minuta_graph(
         await append_trail(pool, state["analysis_id"], state["rules_meta"], steps)
 
     async def iniciar(state: AnalyzeMinutaState) -> dict[str, Any]:
-        # Todo texto que entra no grafo veio de prepare_input: raw_text, file_path ou str comum param aqui.
         require_masked(
             {"text": "", **{k: v for k, v in state.items() if k not in ("analysis_id", "idempotency_key")}},
             what="analyze graph input",
         )
-        # Sem analysis_id a execucao nao veio de analyze(), e ninguem terminaria a linha se ela parasse.
         aid = state.get("analysis_id")
         if not aid:
             raise ValueError(_NO_ANALYSIS_ID_MSG)
         text = state["text"]
         alias = state.get("filename", "")
-        # Falha alto aqui (RulesConfigError), antes de qualquer chamada externa, se faltar regra.
         snap = await load_rules_snapshot(pool)
         await start_analysis(
             pool,
@@ -340,7 +331,7 @@ def build_analyze_minuta_graph(
             params=params,
             idempotency_key=state.get("idempotency_key"),
         )
-        tag_analysis(aid)  # amarra o traco (LangSmith/MLflow) a esta analise; no-op sem rastreio
+        tag_analysis(aid)
         meta = {
             "hash": snap.hash,
             "matrix_version": snap.matrix_version,
@@ -462,7 +453,7 @@ def build_analyze_minuta_graph(
 
         async def checar(cl: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
             lista = riscos_m.get(cl["tema"]) or []
-            if not cl["triado"] or not lista:  # triagem abaixo do corte: sem checagem de riscos
+            if not cl["triado"] or not lista:
                 return [], 0
             qs = {
                 x["id"]: {
@@ -536,7 +527,6 @@ def build_analyze_minuta_graph(
                 "criteria": _Q_REGULA_CRITERIA,
             }
         }
-        # id da norma -> citacao, a partir da matriz de riscos: chave unica para lookup e dedup.
         id_to_citacao = {
             n["id"]: n["citacao"]
             for lista in regras["riscos"].values()
@@ -579,7 +569,6 @@ def build_analyze_minuta_graph(
                 normas.append({"citacao": d["title"], "texto": d["content"][:1200], "nota": res[i][0], "origem": "busca"})
             matriz = [n["citacao"] for x in cl["confirmados"] for n in x.get("normas", []) if n.get("citacao")]
             for c in matriz + tema_cit.get(cl["tema"], []):
-                # Sem texto na base a norma nao entra: o redator so pode citar o que tem texto.
                 if c not in vistos and obrig.get(c):
                     vistos.add(c)
                     normas.append({"citacao": c, "texto": obrig[c], "nota": None, "origem": "matriz"})
@@ -641,7 +630,6 @@ def build_analyze_minuta_graph(
                     raise ValueError("no json")
                 return json.loads(m.group(0)), bruto, r.tokens
             except BudgetExhausted:
-                # Sem "analise", como as alem de max_clauses: nao e uma falha.
                 return None
             except Exception as e:  # noqa: BLE001 - so o tipo, nunca a mensagem (pode conter texto)
                 return {"erro": type(e).__name__}, bruto, 0

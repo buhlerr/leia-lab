@@ -192,7 +192,7 @@ def split_contract_text(
     pieces: list[str] = []
     for seg in text.split(separator):
         seg = seg.strip()
-        while len(seg) > chunk_size:  # segmento maior que o chunk: corta duro
+        while len(seg) > chunk_size:
             pieces.append(seg[:chunk_size])
             seg = seg[chunk_size:]
         if seg:
@@ -208,7 +208,7 @@ def split_contract_text(
         chunks.append(current)
         carry = current[-chunk_overlap:] if chunk_overlap > 0 else ""
         candidate = f"{carry}{separator}{piece}" if carry else piece
-        if len(candidate) > chunk_size:  # overlap nao cabe: descarta-o
+        if len(candidate) > chunk_size:
             candidate = piece
         current = candidate
     if current:

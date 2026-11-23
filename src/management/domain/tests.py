@@ -106,9 +106,6 @@ def _admin_edit(client, obj, **changes) -> None:
     assert resp.status_code == 302, getattr(resp.context.get("adminform"), "errors", resp.status_code)
 
 
-# ---------------------------------------------------------------- historico e banco
-
-
 class DomainCrudHistoryTests(SchemaMixin, TestCase):
     def test_insert_update_grava_domain_history_com_db_user(self):
         mtype = MinutaType.objects.create(slug="t-crud", name="Tipo", classifier_description="desc")
@@ -156,9 +153,6 @@ class SchemaOwnershipTests(SchemaMixin, TestCase):
             self.assertNotIn("DROP", sql, name)
 
 
-# ---------------------------------------------------------------- criterio de aceite
-
-
 class EditorChangesReachNextAnalysisTests(SchemaMixin, TransactionTestCase):
     """Uma pessoa do grupo editor muda risco, tema e prompt PELO ADMIN; a proxima analise usa."""
 
@@ -169,7 +163,6 @@ class EditorChangesReachNextAnalysisTests(SchemaMixin, TransactionTestCase):
         from src.db.seed import seed_defaults
 
         run_with_pool(seed_defaults)
-        # Estado conhecido, independente de outros testes que tenham editado o seed.
         RiskMatrix.objects.filter(risk_id="R-04").update(criticality="amarelo")
         Theme.objects.filter(slug="benfeitorias_e_conservacao").update(description=None)
         from src.db.defaults import SISTEMA_REDIGIR
@@ -219,15 +212,14 @@ class EditorChangesReachNextAnalysisTests(SchemaMixin, TransactionTestCase):
 
         after, questions, systems = self._analyze()
         sev = {a["risk_id"]: a["severity"] for a in after["report_envelope"]["content"]["alerts"]}
-        self.assertEqual(sev["R-04"], "red")  # risco
+        self.assertEqual(sev["R-04"], "red")
         temas = [q["tema"]["criteria"] for q in questions if "tema" in q]
-        self.assertTrue(temas and all(t["benfeitorias_e_conservacao"] == "Benfeitorias (v2)" for t in temas))  # tema
-        self.assertTrue(systems and set(systems) == {novo})  # prompt
+        self.assertTrue(temas and all(t["benfeitorias_e_conservacao"] == "Benfeitorias (v2)" for t in temas))
+        self.assertTrue(systems and set(systems) == {novo})
         a1, a2 = (Analysis.objects.get(pk=x["analysis_id"]) for x in (before, after))
         self.assertNotEqual(a1.matrix_version, a2.matrix_version)
         self.assertNotEqual(a1.prompt_version, a2.prompt_version)
 
-        # historico: quem (login do banco) e o antes/depois de cada uma das 3 edicoes, entre as duas analises
         changes = DomainHistory.objects.filter(id__gt=a1.domain_history_id, id__lte=a2.domain_history_id, op="UPDATE")
         by_table = {h.table_name: h for h in changes}
         self.assertEqual(set(by_table), {"risk_matrix", "themes", "prompts"})
@@ -237,9 +229,6 @@ class EditorChangesReachNextAnalysisTests(SchemaMixin, TransactionTestCase):
             ("amarelo", "vermelho"),
         )
         self.assertEqual(by_table["prompts"].new_row["prompt_text"], novo)
-
-
-# ---------------------------------------------------------------- grupos e admin
 
 
 class GroupPermissionTests(SchemaMixin, TestCase):
@@ -256,7 +245,6 @@ class GroupPermissionTests(SchemaMixin, TestCase):
         for model in ALL_MODELS:
             url = reverse(f"admin:domain_{model._meta.model_name}_changelist")
             self.assertEqual(self.client.get(url).status_code, 200, url)
-        # formulario COMPLETO e valido (o mesmo que o editor mandaria): so a permissao pode barrar.
         self.client.force_login(self.editor)
         url = reverse("admin:domain_riskmatrix_change", args=[self.risk.pk])
         data = {**_change_form_data(self.client.get(url)), "criticality": "vermelho"}
@@ -286,13 +274,10 @@ class AdminSmokeTests(SchemaMixin, TestCase):
         indice = self.client.get(reverse("admin:index")).content.decode()
         for model in ALL_MODELS:
             url = reverse(f"admin:domain_{model._meta.model_name}_changelist")
-            self.assertIn(url, indice)  # o indice lista a tabela...
-            self.assertEqual(self.client.get(url).status_code, 200, url)  # ...e a pagina abre
+            self.assertIn(url, indice)
+            self.assertEqual(self.client.get(url).status_code, 200, url)
 
     def test_admin_bloqueia_escrita_nos_auditaveis(self):
-        # Nem superuser escreve nas tabelas de auditoria pelo admin: GET E POST do add,
-        # POST de alteracao, POST de exclusao e a exclusao em massa do changelist sao
-        # recusados, e nenhuma linha nasce, muda de lugar ou sai.
         MinutaType.objects.create(slug="t-audit", name="T", classifier_description="d")
         historico = DomainHistory.objects.filter(table_name="minuta_types").order_by("-id").first()
         analise = _analysis()
@@ -307,15 +292,13 @@ class AdminSmokeTests(SchemaMixin, TestCase):
             recorded_at=timezone.now(),
         )
         alvo = {DomainHistory: historico, Analysis: analise, AnalysisTrail: trilha}
-        # Cada tabela auditavel de hoje tem que ter cobertura aqui; uma quarta entra
-        # quebrando este teste ate ganhar linha, POSTs e contagem.
         self.assertEqual(set(alvo), set(AUDIT_MODELS))
         antes = {m: m.objects.count() for m in AUDIT_MODELS}
         self.client.force_login(self.admin)
         for model, linha in alvo.items():
             url_add = reverse(f"admin:domain_{model._meta.model_name}_add")
             self.assertEqual(self.client.get(url_add).status_code, 403, url_add)
-            self.assertEqual(self.client.post(url_add, {}).status_code, 403, url_add)  # criar por POST tambem
+            self.assertEqual(self.client.post(url_add, {}).status_code, 403, url_add)
             url_change = reverse(f"admin:domain_{model._meta.model_name}_change", args=[linha.pk])
             self.assertEqual(self.client.post(url_change, {}).status_code, 403, url_change)
             url_delete = reverse(f"admin:domain_{model._meta.model_name}_delete", args=[linha.pk])
@@ -325,9 +308,6 @@ class AdminSmokeTests(SchemaMixin, TestCase):
             self.assertTrue(model.objects.filter(pk=linha.pk).exists(), model.__name__)
         for model in AUDIT_MODELS:
             self.assertEqual(model.objects.count(), antes[model], model.__name__)
-
-
-# ---------------------------------------------------------------- nova analise (pela API)
 
 
 def _analysis(**extra) -> Analysis:
@@ -396,7 +376,7 @@ class NovaAnaliseTests(SchemaMixin, TestCase):
         erro_api = {"code": "invalid_document", "message": "O documento enviado não pode ser lido."}
         with mock.patch.object(domain_admin, "post_analysis", return_value=(422, erro_api)):
             resp = self.client.post(reverse("admin:domain_analysis_nova"), {"file": upload, "idempotency_key": uuid4()})
-        self.assertEqual(resp.status_code, 200)  # formulario volta com a mensagem da API
+        self.assertEqual(resp.status_code, 200)
         corpo = resp.content.decode()
         self.assertIn("O documento enviado não pode ser lido.", corpo)
         self.assertNotIn("Minuta-do-Carlos-Mendes", corpo)
@@ -414,20 +394,17 @@ class NovaAnaliseTests(SchemaMixin, TestCase):
         upload = SimpleUploadedFile("Minuta-do-Carlos.txt", b"CONTRATO DE LOCACAO")
         with override_settings(LEIA_API_TOKEN=""):
             resp = self.client.post(reverse("admin:domain_analysis_nova"), {"file": upload, "idempotency_key": uuid4()})
-        self.assertEqual(resp.status_code, 200)  # formulario volta com mensagem fixa
+        self.assertEqual(resp.status_code, 200)
         corpo = resp.content.decode()
         self.assertIn("LEIA_API_TOKEN", corpo)
         self.assertNotIn("Minuta-do-Carlos", corpo)
-        # direto da funcao de envio: sem token nao ha requisicao (uma tentativa falharia alto)
         key = uuid4()
         with override_settings(LEIA_API_TOKEN=""):
             self.assertEqual(domain_admin.post_analysis("a.txt", b"x", key), (0, {}))
-        # com token, o envio leva a Idempotency-Key do formulario: a API recusa o POST sem ela
         with override_settings(LEIA_API_TOKEN="t"), mock.patch.object(domain_admin.httpx, "Client") as client:
             domain_admin.post_analysis("a.txt", b"x", key)
         enviado = client.return_value.__enter__.return_value.post.call_args
         self.assertEqual(enviado.kwargs["headers"]["Idempotency-Key"], str(key))
-        # sufixo invalido: o formulario barra antes de qualquer chamada
         upload_x = SimpleUploadedFile("planilha.xlsx", b"x")
         with mock.patch.object(domain_admin, "post_analysis") as post_x:
             resp = self.client.post(reverse("admin:domain_analysis_nova"), {"file": upload_x, "idempotency_key": uuid4()})
@@ -443,12 +420,11 @@ class NovaAnaliseTests(SchemaMixin, TestCase):
         key = re.search(r'name="idempotency_key" value="([^"]+)"', pagina).group(1)
         self.assertIn("this.querySelector('[type=submit]').disabled = true", pagina)
         outra = re.search(r'name="idempotency_key" value="([^"]+)"', self.client.get(url).content.decode()).group(1)
-        self.assertNotEqual(key, outra)  # cada formulario aberto e uma analise nova
+        self.assertNotEqual(key, outra)
 
         por_chave: dict[str, str] = {}
 
         def api(filename: str, data: bytes, idempotency_key) -> tuple[int, dict]:
-            # o contrato da API (tests/test_api.py): a mesma chave devolve 200 com a mesma analise
             k = str(idempotency_key)
             if k in por_chave:
                 return 200, {"analysis_id": por_chave[k]}
@@ -506,12 +482,8 @@ class AnalysisDetailTests(SchemaMixin, TestCase):
             resp = self.client.get(reverse("admin:domain_analysis_change", args=[correndo.id]))
             self.assertEqual(resp.status_code, 200)
             corpo = resp.content.decode()
-            # Analise em curso: sem duracao (nao terminou) e sem alertas (sem relatorio).
             self.assertRegex(corpo, r"Duração:</label>\s*<div[^>]*>\s*-\s*</div>")
             self.assertRegex(corpo, r"Alertas:</label>\s*<div[^>]*>\s*nenhum\s*</div>")
-
-
-# ---------------------------------------------------------------- base normativa
 
 
 class KbTests(SchemaMixin, TransactionTestCase):
@@ -527,7 +499,7 @@ class KbTests(SchemaMixin, TransactionTestCase):
             reverse("admin:domain_kbdoc_add"), {"title": "Teste KB Lei 8.245/1991, art. 4", "source": "kb", "file": upload}
         )
         self.assertEqual(resp.status_code, 302)
-        doc = KbDoc.objects.get(title="Teste KB Lei 8.245/1991, art. 4")  # titulo = citacao, nao o nome do arquivo
+        doc = KbDoc.objects.get(title="Teste KB Lei 8.245/1991, art. 4")
         chunks = list(doc.chunks.all())
         self.assertTrue(chunks)
         text = " ".join(c.content for c in chunks)
@@ -542,7 +514,7 @@ class KbTests(SchemaMixin, TransactionTestCase):
         self.client.force_login(_user("editor-kb", group="editor"))
         upload = SimpleUploadedFile("planilha.xlsx", b"x")
         resp = self.client.post(reverse("admin:domain_kbdoc_add"), {"title": "Teste KB xlsx", "source": "kb", "file": upload})
-        self.assertEqual(resp.status_code, 200)  # formulario volta com erro
+        self.assertEqual(resp.status_code, 200)
         self.assertFalse(KbDoc.objects.filter(title="Teste KB xlsx").exists())
 
     def test_reindex_offline(self):
@@ -552,12 +524,9 @@ class KbTests(SchemaMixin, TransactionTestCase):
         self.assertEqual((count, model), (1, "offline-hash-v1"))
         chunk = doc.chunks.get()
         self.assertEqual((len(chunk.embedding), chunk.embedding_model), (1536, "offline-hash-v1"))
-        with connection.cursor() as cursor:  # tsv_content continua gerada pelo banco
+        with connection.cursor() as cursor:
             cursor.execute("SELECT tsv_content::text FROM kb_chunks WHERE id = %s", [str(chunk.id)])
             self.assertIn("loca", cursor.fetchone()[0])
-
-
-# ---------------------------------------------------------------- configuracao
 
 
 class SettingsTests(TestCase):
@@ -583,7 +552,7 @@ class SettingsTests(TestCase):
             env = {**base, **({"DJANGO_BEHIND_HTTPS_PROXY": flag} if flag else {})}
             proc = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, env=env, capture_output=True, text=True, check=True)
             out[flag] = proc.stdout.strip()
-        self.assertEqual(out[""], "None False False")  # padrao: nao confia em cabecalho de proxy
+        self.assertEqual(out[""], "None False False")
         self.assertEqual(out["true"], "('HTTP_X_FORWARDED_PROTO', 'https') True True")
 
     def test_hosts_padrao_so_localhost(self):
