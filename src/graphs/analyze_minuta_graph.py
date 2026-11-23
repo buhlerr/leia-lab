@@ -168,10 +168,20 @@ def _run_config(config: dict[str, Any] | None, inp: dict[str, str]) -> dict[str,
 
 @dataclass(frozen=True)
 class AnalyzeMinutaGraph:
-    """O grafo compilado e o pool em que ele grava: ``analyze`` precisa dos dois para terminar a linha."""
+    """O grafo compilado e o pool em que ele grava: ``analyze`` precisa dos dois para terminar a linha.
+
+    ``ainvoke``/``astream`` delegam ao grafo compilado para provas e depuracao (privacy_probe);
+    a producao continua chamando ``analyze()``/``analyze_stream()``, donos da linha de ``analyses``.
+    """
 
     compiled: Any
     pool: asyncpg.Pool
+
+    async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:
+        return await self.compiled.ainvoke(*args, **kwargs)
+
+    def astream(self, *args: Any, **kwargs: Any) -> Any:
+        return self.compiled.astream(*args, **kwargs)
 
 
 logger = logging.getLogger(__name__)

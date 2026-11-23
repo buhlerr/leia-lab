@@ -57,3 +57,12 @@ async def test_boundary_accepts_the_same_text_once_masked():
     res = await call_jev(mask_payload({"clausula": RAW}), QUESTIONS, OFFLINE)
     emb = await embed_text(mask_personal_data(RAW), OFFLINE)
     assert text and "q" in res["answers"] and emb.vector
+
+
+async def test_the_built_analyze_graph_rejects_unmasked_text_when_invoked_directly():
+    """privacy_probe e provas invocam o grafo compilado direto: a fronteira e a mesma do analyze()."""
+    from src.graphs.analyze_minuta_graph import build_analyze_minuta_graph
+
+    graph = build_analyze_minuta_graph(None, OFFLINE)  # type: ignore[arg-type]
+    with pytest.raises(UnmaskedTextError, match="masked"):
+        await graph.ainvoke({"text": RAW, "filename": "documento-12345678.txt"})
