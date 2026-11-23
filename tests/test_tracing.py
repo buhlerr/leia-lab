@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from urllib.parse import urlsplit
@@ -275,3 +276,144 @@ async def test_analysis_runs_untraced_when_mlflow_setup_raises_and_process_state
         assert "MLFLOW_TRACKING_URI" not in os.environ
     finally:
         mlflow.tracing.reset()
+
+
+def _probe_mlflow_calls(monkeypatch, calls: list[str], failing: str) -> None:
+    """Grava cada chamada que ``client_span``/``tag_span`` fazem ao MLflow; ``failing`` levanta.
+
+    O autolog do LangChain chama as mesmas funcoes por conta propria: so conta quem vem de
+    ``src.tracing``.
+    """
+    import sys
+
+    import mlflow
+    from mlflow.entities import LiveSpan
+
+    def probe(name, real, *, any_caller=False):
+        def call(*args, **kwargs):
+            if not any_caller and sys._getframe(1).f_globals.get("__name__") != "src.tracing":
+                return real(*args, **kwargs)
+            calls.append(name)
+            if name == failing:
+                raise _MlflowDown(name)
+            return real(*args, **kwargs)
+
+        return call
+
+    real_start = mlflow.start_span
+
+    class _Span:
+        def __init__(self, *args, **kwargs):
+            self.cm = real_start(*args, **kwargs)
+
+        def __enter__(self):
+            return self.cm.__enter__()
+
+        def __exit__(self, *exc):
+            return probe("exit", self.cm.__exit__, any_caller=True)(*exc)
+
+    monkeypatch.setattr(mlflow, "start_span", probe("start_span", _Span))
+    monkeypatch.setattr(LiveSpan, "set_inputs", probe("set_inputs", LiveSpan.set_inputs))
+    monkeypatch.setattr(LiveSpan, "set_outputs", probe("set_outputs", LiveSpan.set_outputs))
+    monkeypatch.setattr(mlflow, "get_current_active_span", probe("tag_span", mlflow.get_current_active_span))
+
+
+@pytest.mark.parametrize("failing", ["start_span", "set_inputs", "tag_span", "set_outputs", "exit"])
+async def test_mlflow_failing_inside_a_client_span_turns_tracing_off_and_the_analysis_finishes(
+    seeded, settings, capture, monkeypatch, failing
+):
+    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+    calls: list[str] = []
+    graph = build_analyze_minuta_graph(pool=seeded, settings=settings)
+    with tracing_session(mlflow_uri=capture.mlflow_uri, mlflow_experiment="leia-lab-teste"):
+        _probe_mlflow_calls(monkeypatch, calls, failing)
+        out = await analyze(graph, raw_text=RAW, filename=FILE_NAME)
+
+    assert await seeded.fetchval("SELECT status FROM analyses WHERE id = $1::uuid", out["analysis_id"]) == "done"
+    assert calls.count(failing) == 1, calls
+    after = calls[calls.index(failing) + 1 :]
+    assert after in ([], ["exit"]), f"depois da falha so o span aberto e fechado; chamadas: {calls}"
+
+
+async def test_mlflow_restores_the_env_uri_even_when_set_tracking_uri_raises_on_exit(capture, monkeypatch):
+    import mlflow
+
+    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    real = mlflow.set_tracking_uri
+    calls: list[str] = []
+
+    def set_uri_then_fail(uri):
+        calls.append("set_tracking_uri")
+        if len(calls) > 1:
+            raise _MlflowDown("set_tracking_uri")
+        real(uri)
+
+    monkeypatch.setattr(mlflow, "set_tracking_uri", set_uri_then_fail)
+    try:
+        with mlflow_tracing(tracking_uri=capture.mlflow_uri, experiment_name="leia-lab-teste"):
+            assert os.environ.get("MLFLOW_TRACKING_URI") == capture.mlflow_uri
+        assert calls == ["set_tracking_uri", "set_tracking_uri"]
+        assert "MLFLOW_TRACKING_URI" not in os.environ
+    finally:
+        real(None)
+        mlflow.tracing.reset()
+
+
+@pytest.fixture
+def langsmith_env(monkeypatch):
+    """Variaveis da LangSmith lidas de novo: o SDK guarda cada uma em cache no processo."""
+    from langsmith import utils
+
+    utils.get_env_var.cache_clear()
+    yield monkeypatch
+    monkeypatch.undo()
+    utils.get_env_var.cache_clear()
+
+
+async def test_analysis_runs_untraced_when_the_langsmith_env_breaks_the_client(seeded, settings, langsmith_env):
+    langsmith_env.delenv("MLFLOW_TRACKING_URI", raising=False)
+    langsmith_env.setenv("LANGSMITH_API_KEY", "lsv2-falsa")
+    langsmith_env.setenv("LANGSMITH_TRACING_MODE", "modo-invalido")  # Client() levanta LangSmithUserError
+    graph = build_analyze_minuta_graph(pool=seeded, settings=settings)
+    with tracing_session() as active:
+        out = await analyze(graph, raw_text=RAW, filename=FILE_NAME)
+    assert active["langsmith"] is None
+    assert await seeded.fetchval("SELECT status FROM analyses WHERE id = $1::uuid", out["analysis_id"]) == "done"
+
+
+@respx.mock
+async def test_client_call_returns_its_result_when_the_langsmith_env_breaks_the_run(capture, langsmith_env):
+    langsmith_env.setenv("LANGSMITH_ENDPOINT", "http://127.0.0.1:1")
+    langsmith_env.setenv("LANGSMITH_RUNS_ENDPOINTS", '{"http://127.0.0.1:2": "lsv2-falsa"}')  # RunTree() levanta
+    s = Settings(TYPESAFE_API_KEY="sk-teste", TYPESAFE_BASE_URL="https://jev.invalid/v1/systemone")
+    respx.post(s.TYPESAFE_BASE_URL).mock(return_value=httpx.Response(200, json={"answers": {"q": {"noul": 0.9}}}))
+    with langsmith_tracing(client=capture.client, project_name="leia-lab-teste"):
+        out = await call_jev(*JEV_ARGS, s)
+    assert out["answers"] == {"q": {"noul": 0.9}}
+
+
+class _BusinessError(Exception):
+    pass
+
+
+@pytest.mark.parametrize("error", [_BusinessError("regra"), asyncio.CancelledError()])
+async def test_client_span_lets_errors_of_the_wrapped_call_through_untouched(capture, monkeypatch, error):
+    from src.tracing import client_span
+
+    @client_span("chamada", allowed=("x",))
+    async def fails(x):
+        raise error
+
+    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+    with (
+        tracing_session(
+            langsmith_client=capture.client,
+            langsmith_project="leia-lab-teste",
+            mlflow_uri=capture.mlflow_uri,
+            mlflow_experiment="leia-lab-teste",
+        ),
+        pytest.raises(type(error)) as raised,
+    ):
+        await fails(1)
+    assert raised.value is error
