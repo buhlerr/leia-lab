@@ -7,6 +7,7 @@ Rodar: uv run python -m src.management.manage test src.management.domain
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from datetime import timedelta
@@ -377,7 +378,7 @@ class NovaAnaliseTests(SchemaMixin, TestCase):
         self.client.force_login(self.editor)
         upload = SimpleUploadedFile("Minuta-do-Carlos.txt", b"CONTRATO DE LOCACAO")
         with mock.patch.object(domain_admin, "post_analysis", return_value=(201, {"analysis_id": str(alvo.id)})) as post:
-            resp = self.client.post(reverse("admin:domain_analysis_nova"), {"file": upload})
+            resp = self.client.post(reverse("admin:domain_analysis_nova"), {"file": upload, "idempotency_key": uuid4()})
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp["Location"], reverse("admin:domain_analysis_change", args=[alvo.id]))
         self.assertEqual(post.call_count, 1)
@@ -387,14 +388,14 @@ class NovaAnaliseTests(SchemaMixin, TestCase):
         url = reverse("admin:domain_analysis_nova")
         self.assertEqual(self.client.get(url).status_code, 403)
         upload = SimpleUploadedFile("minuta.txt", b"CONTRATO DE LOCACAO")
-        self.assertEqual(self.client.post(url, {"file": upload}).status_code, 403)
+        self.assertEqual(self.client.post(url, {"file": upload, "idempotency_key": uuid4()}).status_code, 403)
 
     def test_erro_da_api_aparece_e_o_nome_do_arquivo_nunca(self):
         self.client.force_login(self.editor)
         upload = SimpleUploadedFile("Minuta-do-Carlos-Mendes.txt", b"CONTRATO DE LOCACAO")
         erro_api = {"code": "invalid_document", "message": "O documento enviado não pode ser lido."}
         with mock.patch.object(domain_admin, "post_analysis", return_value=(422, erro_api)):
-            resp = self.client.post(reverse("admin:domain_analysis_nova"), {"file": upload})
+            resp = self.client.post(reverse("admin:domain_analysis_nova"), {"file": upload, "idempotency_key": uuid4()})
         self.assertEqual(resp.status_code, 200)  # formulario volta com a mensagem da API
         corpo = resp.content.decode()
         self.assertIn("O documento enviado não pode ser lido.", corpo)
@@ -404,7 +405,7 @@ class NovaAnaliseTests(SchemaMixin, TestCase):
         self.client.force_login(self.editor)
         upload = SimpleUploadedFile("minuta.txt", b"CONTRATO DE LOCACAO")
         with mock.patch.object(domain_admin, "post_analysis", side_effect=httpx.ConnectError("boom")):
-            resp = self.client.post(reverse("admin:domain_analysis_nova"), {"file": upload})
+            resp = self.client.post(reverse("admin:domain_analysis_nova"), {"file": upload, "idempotency_key": uuid4()})
         self.assertEqual(resp.status_code, 200)
         self.assertIn("API indisponível", resp.content.decode())
 
@@ -412,27 +413,56 @@ class NovaAnaliseTests(SchemaMixin, TestCase):
         self.client.force_login(self.editor)
         upload = SimpleUploadedFile("Minuta-do-Carlos.txt", b"CONTRATO DE LOCACAO")
         with override_settings(LEIA_API_TOKEN=""):
-            resp = self.client.post(reverse("admin:domain_analysis_nova"), {"file": upload})
+            resp = self.client.post(reverse("admin:domain_analysis_nova"), {"file": upload, "idempotency_key": uuid4()})
         self.assertEqual(resp.status_code, 200)  # formulario volta com mensagem fixa
         corpo = resp.content.decode()
         self.assertIn("LEIA_API_TOKEN", corpo)
         self.assertNotIn("Minuta-do-Carlos", corpo)
         # direto da funcao de envio: sem token nao ha requisicao (uma tentativa falharia alto)
+        key = uuid4()
         with override_settings(LEIA_API_TOKEN=""):
-            self.assertEqual(domain_admin.post_analysis("a.txt", b"x"), (0, {}))
-        # com token, cada envio leva uma Idempotency-Key nova: a API recusa o POST sem ela
+            self.assertEqual(domain_admin.post_analysis("a.txt", b"x", key), (0, {}))
+        # com token, o envio leva a Idempotency-Key do formulario: a API recusa o POST sem ela
         with override_settings(LEIA_API_TOKEN="t"), mock.patch.object(domain_admin.httpx, "Client") as client:
-            domain_admin.post_analysis("a.txt", b"x")
-            domain_admin.post_analysis("a.txt", b"x")
-        keys = [c.kwargs["headers"]["Idempotency-Key"] for c in client.return_value.__enter__.return_value.post.call_args_list]
-        self.assertEqual(len(set(keys)), 2)
+            domain_admin.post_analysis("a.txt", b"x", key)
+        enviado = client.return_value.__enter__.return_value.post.call_args
+        self.assertEqual(enviado.kwargs["headers"]["Idempotency-Key"], str(key))
         # sufixo invalido: o formulario barra antes de qualquer chamada
         upload_x = SimpleUploadedFile("planilha.xlsx", b"x")
         with mock.patch.object(domain_admin, "post_analysis") as post_x:
-            resp = self.client.post(reverse("admin:domain_analysis_nova"), {"file": upload_x})
+            resp = self.client.post(reverse("admin:domain_analysis_nova"), {"file": upload_x, "idempotency_key": uuid4()})
         self.assertEqual(resp.status_code, 200)
         self.assertIn("Use .pdf, .docx ou .txt.", resp.content.decode())
         post_x.assert_not_called()
+
+    def test_duplo_envio_do_mesmo_formulario_grava_uma_analise(self):
+        """Duplo clique ou reenvio repetem a chave gerada no GET; a API grava uma linha por chave."""
+        self.client.force_login(self.editor)
+        url = reverse("admin:domain_analysis_nova")
+        pagina = self.client.get(url).content.decode()
+        key = re.search(r'name="idempotency_key" value="([^"]+)"', pagina).group(1)
+        self.assertIn("this.querySelector('[type=submit]').disabled = true", pagina)
+        outra = re.search(r'name="idempotency_key" value="([^"]+)"', self.client.get(url).content.decode()).group(1)
+        self.assertNotEqual(key, outra)  # cada formulario aberto e uma analise nova
+
+        por_chave: dict[str, str] = {}
+
+        def api(filename: str, data: bytes, idempotency_key) -> tuple[int, dict]:
+            # o contrato da API (tests/test_api.py): a mesma chave devolve 200 com a mesma analise
+            k = str(idempotency_key)
+            if k in por_chave:
+                return 200, {"analysis_id": por_chave[k]}
+            por_chave[k] = str(_analysis().id)
+            return 201, {"analysis_id": por_chave[k]}
+
+        with mock.patch.object(domain_admin, "post_analysis", side_effect=api):
+            respostas = [
+                self.client.post(url, {"file": SimpleUploadedFile("minuta.txt", b"CONTRATO"), "idempotency_key": key})
+                for _ in range(2)
+            ]
+        self.assertEqual(Analysis.objects.count(), 1)
+        destino = reverse("admin:domain_analysis_change", args=[por_chave[key]])
+        self.assertEqual([(r.status_code, r["Location"]) for r in respostas], [(302, destino)] * 2)
 
     def test_botao_nova_analise_no_changelist_so_para_editor(self):
         self.client.force_login(self.editor)
