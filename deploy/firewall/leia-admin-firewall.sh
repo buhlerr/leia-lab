@@ -13,8 +13,8 @@ rules='*filter
 -A LEIA-ADMIN -j DROP
 '
 for port in 8000 8080; do
-  jump="DOCKER-USER -p tcp -m conntrack --ctorigdstport $port --ctdir ORIGINAL -j LEIA-ADMIN"
-  iptables -C $jump 2>/dev/null || rules="$rules-I $jump
+  set -- DOCKER-USER -p tcp -m conntrack --ctorigdstport "$port" --ctdir ORIGINAL -j LEIA-ADMIN
+  iptables -C "$@" 2>/dev/null || rules="$rules-I $*
 "
 done
 printf '%sCOMMIT\n' "$rules" | iptables-restore --noflush

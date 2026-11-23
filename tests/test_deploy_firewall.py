@@ -104,8 +104,9 @@ def fake_main(prog, argv):
             chains = restore(state["chains"], sys.stdin.read(), "--noflush" in argv or "-n" in argv)
         else:
             chains = {k: [list(r) for r in v] for k, v in state["chains"].items()}
-            apply(chains, [a for a in argv if a != "-w"])
-            if argv[0] == "-C":
+            args = [a for a in argv if a != "-w"]
+            apply(chains, args)
+            if args[0] == "-C":
                 return 0
     except IptablesError as e:
         print(f"{prog}: {e}", file=sys.stderr)
@@ -119,6 +120,10 @@ def fake_main(prog, argv):
 def _matches(rule, packet):
     it = iter(rule)
     for tok in it:
+        if tok == "-p" and next(it) != packet.get("proto", "tcp"):
+            return False
+        if tok == "--ctdir" and next(it) != packet.get("ctdir", "ORIGINAL"):
+            return False
         if tok == "-s" and next(it).removesuffix("/32") != packet["src"]:
             return False
         if tok == "-i":
@@ -152,15 +157,21 @@ def lan_dropped(chains, port):
 def firewall(tmp_path):
     state = tmp_path / "state.json"
     state.write_text(json.dumps({"chains": {"DOCKER-USER": DOCKER_DEFAULT}, "history": []}))
+    script = Path(__file__).resolve().as_posix()
+    python = Path(sys.executable).as_posix()
     bindir = tmp_path / "bin"
     bindir.mkdir()
     for prog in ("iptables", "iptables-restore"):
         shim = bindir / prog
-        shim.write_text(f'#!/bin/sh\nexec "{sys.executable}" "{Path(__file__).resolve()}" {prog} "$@"\n')
+        shim.write_text(f"#!/bin/sh\nexec {shlex.quote(python)} {shlex.quote(script)} {prog} \"$@\"\n", newline="\n")
         shim.chmod(0o755)
-    env = {**os.environ, "PATH": f"{bindir}:{os.environ['PATH']}", "FAKE_IPTABLES_STATE": str(state)}
+    env = {**os.environ, "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}", "FAKE_IPTABLES_STATE": str(state)}
 
-    def run():
+    def run(seed=None):
+        if seed is not None:
+            current = json.loads(state.read_text())
+            current["chains"].update(seed)
+            state.write_text(json.dumps(current))
         subprocess.run(["sh", str(SCRIPT)], env=env, check=True, capture_output=True, text=True)
         return json.loads(state.read_text())
 
@@ -190,6 +201,24 @@ def test_estado_final_libera_so_newt_e_docker_e_e_idempotente(firewall):
     assert verdict(chains, "DOCKER-USER", {**LAN, "dport": "5432"}) is None
     assert chains["DOCKER-USER"][-1] == DOCKER_DEFAULT[0], "a regra RETURN do Docker sumiu"
     assert len(chains["DOCKER-USER"]) == len(PORTS) + 1, chains["DOCKER-USER"]
+
+
+def test_reaplicar_revoga_liberacao_antiga_e_nao_duplica_regras(firewall):
+    firewall()
+    stale = "192.168.0.99"
+    chains = firewall(seed={"LEIA-ADMIN": [["-s", stale, "-j", "RETURN"], *firewall()["chains"]["LEIA-ADMIN"]]})["chains"]
+
+    for port in PORTS:
+        assert verdict(chains, "DOCKER-USER", {"src": stale, "iface": "eth0", "dport": port}) == "DROP"
+    assert len(chains["LEIA-ADMIN"]) == 4, chains["LEIA-ADMIN"]
+
+
+def test_salto_so_vale_para_tcp_na_direcao_original(firewall):
+    chains = firewall()["chains"]
+
+    for port in PORTS:
+        assert verdict(chains, "DOCKER-USER", {**LAN, "dport": port, "proto": "udp"}) is None
+        assert verdict(chains, "DOCKER-USER", {**LAN, "dport": port, "ctdir": "REPLY"}) is None
 
 
 if __name__ == "__main__":
