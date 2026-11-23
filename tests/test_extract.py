@@ -4,18 +4,24 @@ from __future__ import annotations
 
 import io
 import zipfile
+from pathlib import Path
 
 import docx
 import pypdf
 import pytest
 
+from src.graphs.ingest_graph import _read_path
 from src.ingest.extract import (
+    MAX_TEXT_CHARS,
+    BoundedText,
     DocumentError,
     DocumentTooLargeError,
     EmptyDocumentError,
     InvalidDocumentError,
     UnsupportedFileError,
+    extract,
     extract_text,
+    require_bounded,
 )
 
 
@@ -151,3 +157,72 @@ def test_two_document_errors_cannot_share_a_code():
             http_status = 422
             code = "invalid_document"
             public_message = "Outra mensagem."
+
+
+def test_extract_docx_rejects_text_above_max_text_chars(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("src.ingest.extract.MAX_TEXT_CHARS", 5)
+
+    with pytest.raises(DocumentTooLargeError):
+        extract_text("minuta.docx", _docx_with_table())
+
+
+def test_read_path_rejects_txt_above_max_text_chars(tmp_path: Path):
+    path = tmp_path / "grande.txt"
+    path.write_text("a" * (MAX_TEXT_CHARS + 1), encoding="utf-8")
+
+    with pytest.raises(DocumentTooLargeError):
+        _read_path(path)
+
+
+def test_read_path_rejects_txt_above_max_upload_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    path = tmp_path / "grande.txt"
+    path.write_bytes(b"x" * 11)
+    monkeypatch.setattr("src.ingest.extract.MAX_UPLOAD_BYTES", 10)
+
+    with pytest.raises(DocumentTooLargeError):
+        _read_path(path)
+
+
+def test_bounded_text_cannot_be_constructed_directly():
+    with pytest.raises(TypeError, match="BoundedText"):
+        BoundedText("texto cru")
+
+    with pytest.raises(TypeError, match="BoundedText"):
+        require_bounded("texto cru", what="teste")
+
+
+def test_extract_accepts_path_and_bytes_and_returns_bounded_text(tmp_path: Path):
+    txt_path = tmp_path / "contrato.txt"
+    txt_path.write_text("  Clausula unica  ", encoding="utf-8")
+
+    from_path = extract(txt_path)
+    from_bytes = extract(b"  Clausula unica  ", filename="contrato.txt")
+    from_pdf = extract(_pdf_with_text("Contrato PDF"), filename="contrato.pdf")
+    from_docx = extract(_docx_with_table(), filename="contrato.docx")
+    from_read_path = _read_path(txt_path)
+
+    for value in (from_path, from_bytes, from_pdf, from_docx, from_read_path):
+        assert isinstance(value, BoundedText)
+    assert from_path == "Clausula unica"
+    assert from_bytes == "Clausula unica"
+
+
+def test_extract_rejects_invalid_txt_empty_txt_and_oversized_txt():
+    with pytest.raises(InvalidDocumentError):
+        extract(b"\xff\xfe", filename="invalido.txt")
+    with pytest.raises(EmptyDocumentError):
+        extract(b"   \n\t ", filename="vazio.txt")
+    with pytest.raises(DocumentTooLargeError):
+        extract(("a" * (MAX_TEXT_CHARS + 1)).encode("utf-8"), filename="enorme.txt")
+    with pytest.raises(UnsupportedFileError):
+        extract(b"dados", filename="arquivo.exe")
+
+
+def test_read_path_accepts_markdown_within_limits(tmp_path: Path):
+    md = tmp_path / "norma.md"
+    md.write_text("# Lei 8.245/1991", encoding="utf-8")
+
+    result = _read_path(md)
+
+    assert isinstance(result, BoundedText)
+    assert result == "# Lei 8.245/1991"

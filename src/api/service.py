@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import uuid
 from typing import Any
 
@@ -19,17 +18,8 @@ import asyncpg
 
 from src.db.analyses import AnalysisKeyTaken
 from src.graphs.analyze_minuta_graph import analyze
-from src.ingest.extract import (
-    MAX_UPLOAD_BYTES,
-    DocumentTooLargeError,
-    EmptyDocumentError,
-    InvalidDocumentError,
-    UnsupportedFileError,
-)
+from src.ingest.extract import BoundedText, extract, require_bounded
 from src.ingest.isolated import extract_text_isolated
-
-# Extensoes que podem ser patologicas: extracao em processo separado.
-_ISOLATED_EXTENSIONS = frozenset({".pdf", ".docx"})
 
 # Status com resultado pronto: so estes o retry devolve.
 _REPLAYABLE = frozenset({"done", "unsupported"})
@@ -49,22 +39,31 @@ def _decode(value: Any) -> Any:
     return json.loads(value) if isinstance(value, str) else value
 
 
-async def _extract_text(filename: str, data: bytes) -> str:
-    """Texto do upload conforme a extensao; erros sao sempre ``DocumentError``.
+async def _extract_text(filename: str, data: bytes) -> BoundedText:
+    return await asyncio.to_thread(
+        extract, data, filename=filename, isolated=True, isolated_reader=extract_text_isolated
+    )
 
-    O teto de bytes vale antes de qualquer biblioteca abrir o arquivo.
-    """
-    if len(data) > MAX_UPLOAD_BYTES:
-        raise DocumentTooLargeError("The file is larger than the upload limit")
-    extension = os.path.splitext(filename)[1].lower()
-    if extension in _ISOLATED_EXTENSIONS:
-        return await asyncio.to_thread(extract_text_isolated, extension, data)
-    if extension == ".txt":
-        try:
-            return data.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise InvalidDocumentError("The file is not valid UTF-8") from exc
-    raise UnsupportedFileError("Unsupported file extension")
+
+async def evaluate_text(
+    pool: asyncpg.Pool, graph: Any, *, text: BoundedText, filename: str, idempotency_key: str
+) -> tuple[dict[str, Any], bool]:
+    """Avalia um contrato ja extraido (``BoundedText``); devolve o resultado com a trilha e se ele foi criado agora."""
+    bounded = require_bounded(text, what="evaluate_text")
+    try:
+        state = await analyze(graph, raw_text=bounded, filename=filename, idempotency_key=idempotency_key)
+    except AnalysisKeyTaken as taken:
+        if not taken.same_input:
+            raise
+        analysis_id, created = taken.analysis_id, False
+    else:
+        analysis_id, created = state["analysis_id"], True
+    result = await load_analysis(pool, analysis_id)
+    if result is None:  # a linha existe: a execucao ou a chave acabaram de apontar para ela
+        raise RuntimeError("analysis row not found after a completed run")  # pragma: no cover
+    if not created and result["status"] not in _REPLAYABLE:
+        raise AnalysisNotReplayable(analysis_id, result["status"])
+    return result, created
 
 
 async def evaluate_upload(
@@ -78,22 +77,7 @@ async def evaluate_upload(
     falhou; para outra entrada, ``AnalysisKeyTaken`` sobe.
     """
     text = await _extract_text(filename, data)
-    if not text.strip():
-        raise EmptyDocumentError("The document has no text")
-    try:
-        state = await analyze(graph, raw_text=text, filename=filename, idempotency_key=idempotency_key)
-    except AnalysisKeyTaken as taken:
-        if not taken.same_input:
-            raise
-        analysis_id, created = taken.analysis_id, False
-    else:
-        analysis_id, created = state["analysis_id"], True
-    result = await load_analysis(pool, analysis_id)
-    if result is None:  # a linha existe: a execucao ou a chave acabaram de apontar para ela
-        raise RuntimeError("analysis row not found after a completed run")  # pragma: no cover
-    if not created and result["status"] not in _REPLAYABLE:
-        raise AnalysisNotReplayable(analysis_id, result["status"])
-    return result, created
+    return await evaluate_text(pool, graph, text=text, filename=filename, idempotency_key=idempotency_key)
 
 
 async def load_analysis(pool: asyncpg.Pool, analysis_id: uuid.UUID | str) -> dict[str, Any] | None:

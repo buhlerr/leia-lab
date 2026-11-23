@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import json
 import uuid
 from contextlib import asynccontextmanager
 from typing import Iterator
@@ -21,7 +22,7 @@ from src.config import Settings
 from src.db.connection import init_db
 from src.graphs.ingest_graph import build_ingest_graph
 from src.graphs.ingest_graph import ingest as run_ingest
-from src.ingest.extract import MAX_UPLOAD_BYTES
+from src.ingest.extract import MAX_TEXT_CHARS, MAX_UPLOAD_BYTES
 from tests._capture import capture  # noqa: F401 - fixture
 from tests._db_guard import SuiteSettings
 from tests._rules_helper import use_rules
@@ -494,3 +495,155 @@ async def test_cliente_presente_deixa_o_trabalho_terminar() -> None:
             return False
 
     assert await run_disconnect_guarded(work(), Never()) == "resultado"
+
+
+# ---------------------------------------------------------------- entrada limitada e auth antes do corpo
+
+
+def _multipart_chunks(payload_chunks: list[bytes], *, filename: str = "grande.txt", boundary: str = "leia-bound") -> list[bytes]:
+    head = (
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'
+        "Content-Type: text/plain\r\n\r\n"
+    ).encode("utf-8")
+    tail = f"\r\n--{boundary}--\r\n".encode("utf-8")
+    return [head, *payload_chunks, tail]
+
+
+async def _asgi_post_analyses(
+    app, *, headers: list[tuple[bytes, bytes]], chunks: list[bytes]
+) -> tuple[int, bytes, int]:
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/v1/analyses",
+        "raw_path": b"/v1/analyses",
+        "query_string": b"",
+        "headers": headers,
+        "client": ("127.0.0.1", 12345),
+        "server": ("testserver", 80),
+    }
+    remaining = iter(chunks)
+    bytes_read = 0
+
+    async def receive() -> dict[str, object]:
+        nonlocal bytes_read
+        chunk = next(remaining, None)
+        if chunk is None:
+            return {"type": "http.request", "body": b"", "more_body": False}
+        bytes_read += len(chunk)
+        return {"type": "http.request", "body": chunk, "more_body": True}
+
+    status = 0
+    body = bytearray()
+
+    async def send(message: dict[str, object]) -> None:
+        nonlocal status
+        if message["type"] == "http.response.start":
+            status = int(message["status"])
+        elif message["type"] == "http.response.body":
+            body.extend(message.get("body", b""))
+
+    await app(scope, receive, send)
+    return status, bytes(body), bytes_read
+
+
+async def test_post_txt_above_max_text_chars_returns_413(pool, api_settings) -> None:
+    await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
+    data = ("a" * (MAX_TEXT_CHARS + 1)).encode("utf-8")
+    async with api_client(api_settings) as client:
+        r = await client.post(
+            "/v1/analyses",
+            files={"file": ("enorme.txt", data, "text/plain")},
+            headers=_auth(),
+        )
+    assert r.status_code == 413
+    assert r.json()["code"] == "document_too_large"
+
+
+@pytest.mark.parametrize("auth_header", [None, f"Bearer {TOKEN}-errado", "Basic abc"])
+async def test_post_without_valid_token_returns_401_without_reading_body(
+    pool, api_settings, auth_header: str | None
+) -> None:
+    one_mb = b"x" * (1024 * 1024)
+    chunks = _multipart_chunks([one_mb] * 4)
+    total = sum(len(c) for c in chunks)
+    headers: list[tuple[bytes, bytes]] = [
+        (b"content-type", b"multipart/form-data; boundary=leia-bound"),
+        (b"content-length", str(total).encode()),
+        (b"idempotency-key", str(uuid.uuid4()).encode()),
+    ]
+    if auth_header is not None:
+        headers.append((b"authorization", auth_header.encode()))
+
+    app = create_app(api_settings)
+    async with app.router.lifespan_context(app):
+        status, body, bytes_read = await _asgi_post_analyses(app, headers=headers, chunks=chunks)
+
+    assert status == 401
+    assert json.loads(body)["code"] == "unauthorized"
+    assert bytes_read == 0
+
+
+async def test_post_oversized_content_length_returns_413_without_reading_body(pool, api_settings) -> None:
+    one_mb = b"x" * (1024 * 1024)
+    chunks = _multipart_chunks([one_mb] * 50)
+    total = sum(len(c) for c in chunks)
+    headers = [
+        (b"authorization", f"Bearer {TOKEN}".encode()),
+        (b"idempotency-key", str(uuid.uuid4()).encode()),
+        (b"content-type", b"multipart/form-data; boundary=leia-bound"),
+        (b"content-length", str(total).encode()),
+    ]
+
+    app = create_app(api_settings)
+    async with app.router.lifespan_context(app):
+        status, body, bytes_read = await _asgi_post_analyses(app, headers=headers, chunks=chunks)
+
+    assert status == 413
+    assert json.loads(body)["code"] == "document_too_large"
+    assert bytes_read == 0
+
+
+async def test_post_chunked_oversized_stops_reading_at_limit(pool, api_settings) -> None:
+    one_mb = b"x" * (1024 * 1024)
+    chunks = _multipart_chunks([one_mb] * 50)
+    headers = [
+        (b"authorization", f"Bearer {TOKEN}".encode()),
+        (b"idempotency-key", str(uuid.uuid4()).encode()),
+        (b"content-type", b"multipart/form-data; boundary=leia-bound"),
+    ]
+
+    app = create_app(api_settings)
+    async with app.router.lifespan_context(app):
+        status, body, bytes_read = await _asgi_post_analyses(app, headers=headers, chunks=chunks)
+
+    assert status == 413
+    assert json.loads(body)["code"] == "document_too_large"
+    assert bytes_read < 40 * 1024 * 1024
+
+
+async def test_evaluate_text_rejects_unbounded_str() -> None:
+    from src.api.service import evaluate_text
+
+    with pytest.raises(TypeError, match="BoundedText"):
+        await evaluate_text(None, None, text="texto sem passar por extract", filename="a.txt", idempotency_key="k")  # type: ignore[arg-type]
+
+
+async def test_post_invalid_content_length_returns_400_without_reading_body(pool, api_settings) -> None:
+    headers = [
+        (b"authorization", f"Bearer {TOKEN}".encode()),
+        (b"idempotency-key", str(uuid.uuid4()).encode()),
+        (b"content-type", b"multipart/form-data; boundary=leia-bound"),
+        (b"content-length", b"nao-e-numero"),
+    ]
+    app = create_app(api_settings)
+    async with app.router.lifespan_context(app):
+        status, body, bytes_read = await _asgi_post_analyses(app, headers=headers, chunks=[b"payload"])
+
+    assert status == 400
+    assert json.loads(body)["code"] == "invalid_content_length"
+    assert bytes_read == 0
