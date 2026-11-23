@@ -10,6 +10,9 @@ ou dependência de event loop ativo.
 
 Entrypoint no GraphLoupe:
 ``src.graphs.debug:build_graph`` ou ``src.graphs.debug:graph``
+
+O input precisa de ``text`` ja mascarado e de um ``analysis_id`` (uuid novo). Rodando o grafo
+direto, ninguem termina a linha de ``analyses`` se a execucao parar no meio: so ``analyze()`` faz isso.
 """
 
 from __future__ import annotations
@@ -92,7 +95,7 @@ def build_graph(checkpointer: Any = None) -> Any:
     pool_proxy = LazyAsyncpgPoolProxy()
     settings = Settings()
     saver = checkpointer or _saver
-    return build_analyze_minuta_graph(pool_proxy, settings, checkpointer=saver)  # type: ignore[arg-type]
+    return build_analyze_minuta_graph(pool_proxy, settings, checkpointer=saver).compiled  # type: ignore[arg-type]
 
 
 def build_app(checkpointer: Any = None) -> Any:

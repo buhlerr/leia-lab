@@ -29,10 +29,15 @@ BOUNDARY_CALLS = {
     ),
     "embed_text(text)": lambda: embed_text(RAW, OFFLINE),
     "start_analysis(masked_text)": lambda: start_analysis(
-        None, None, filename_alias=resolve_doc_alias("x.txt"), masked_text=RAW, params={}
+        None, None, analysis_id="a", filename_alias=resolve_doc_alias("x.txt"), masked_text=RAW, params={}
     ),
     "start_analysis(filename_alias)": lambda: start_analysis(
-        None, None, filename_alias="minuta_Carlos_Eduardo_Mendes.txt", masked_text=mask_personal_data(RAW), params={}
+        None,
+        None,
+        analysis_id="a",
+        filename_alias="minuta_Carlos_Eduardo_Mendes.txt",
+        masked_text=mask_personal_data(RAW),
+        params={},
     ),
 }
 
