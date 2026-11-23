@@ -20,7 +20,7 @@ Pick a run id (`[a-z0-9_]`, e.g. `r1`). Each run owns the database `leia_lab_ver
 The database server is picked automatically:
 
 1. `VERIFY_PG_SERVER` if set (e.g. `postgresql://leia:leia_lab_2026@localhost:5433` for the docker-compose Postgres).
-2. Otherwise the homelab Postgres (CT 116, `192.168.0.120:5432`, user `leia`) when the Windows user variable `LEIA_HOMELAB_PG_PASSWORD` is set. This is the usual case: local Docker is normally stopped. The same server hosts the production `leia_lab` and Directus, so the helper only ever creates and drops `leia_lab_verify_*`.
+2. Otherwise the homelab Postgres (CT 116, user `leia`; the address is inventory, kept in `docs/OPERACAO.md` — the helper has it) when the Windows user variable `LEIA_HOMELAB_PG_PASSWORD` is set. This is the usual case: local Docker is normally stopped. The same server hosts the production `leia_lab` and Directus, so the helper only ever creates and drops `leia_lab_verify_*`.
 3. Otherwise `localhost:5433` (start it with `docker compose up -d postgres`).
 
 ```bash
@@ -99,7 +99,7 @@ It stops the admin server this run started (by the recorded PID, `taskkill /T`),
 
 ## Helpers
 
-`scripts/verify.py` (stdlib + the repo's `.venv`, which has asyncpg). Always invoke it with `.venv/Scripts/python.exe`. Subcommands, all taking `--run-id ID`:
+`.claude/skills/verify-leia-lab/scripts/verify.py` (stdlib + the repo's `.venv`, which has asyncpg). Always invoke it with `.venv/Scripts/python.exe`. Subcommands, all taking `--run-id ID`:
 
 | Subcommand | Does |
 |---|---|

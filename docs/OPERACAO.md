@@ -31,6 +31,13 @@ Estado do túnel: `ssh pve "pct exec 103 -- systemctl status cloudflared"` e
 O Newt e o Pangolin continuam instalados para os outros serviços; a chave da API do Pangolin (1Password,
 item `Pangolin API Key - leialab` do cofre `DEV`) só vale para eles.
 
+## Admin: https://admin.rauvbr.com
+
+O Django Admin (`src/management/`) por trás do Cloudflare Access e do login do Django (grupos `editor` e
+`leitor`). Superfície: edição da **matriz de risco** (histórico em `domain_history`), a página **Nova
+análise** (o arquivo vai pelo servidor à API, ver "Rastreio da API") e, para cada análise, o **relatório
+e a trilha** gravados na auditoria do Postgres.
+
 ## API para a camada FE: https://leia-api.rauvbr.com
 
 | Peça | Estado (2026-11-21) |
@@ -44,6 +51,9 @@ item `Pangolin API Key - leialab` do cofre `DEV`) só vale para eles.
 
 Passar o token ao FE: `ssh root@192.168.0.9 pct exec 116 -- grep LEIA_API_TOKEN /root/leia/api.env`. Para
 trocar o token, edite o `api.env` e rode `docker compose up -d --no-deps api`.
+
+Superfície: contrato OpenAPI em `/docs`; `GET /v1/analyses/{id}` devolve o relatório e a trilha.
+A API não tem rota que liste análises.
 
 Atualizar a API para um commit novo (o admin não é tocado):
 
@@ -87,7 +97,8 @@ op run --env-file=.env.op -- uv run python -m src.cli gold-run --label real-v1 -
 - **VPS:** conta de serviço **só de leitura** no cofre `DEV`, token em `~/.config/op/leia-lab.token`
   (mode 600, fora do git). Antes do `op run`: `export OP_SERVICE_ACCOUNT_TOKEN="$(cat ~/.config/op/leia-lab.token)"`.
 - **Não use `op inject` nem `op read` para gravar valores em arquivo** em sessão de agente.
-- Os `.env` de produção no CT 116 (`/root/leia/*.env`) continuam como estão; não leem do 1Password.
+- O 1Password **não** guarda `DATABASE_URL` nem `LEIA_API_TOKEN`: os dois existem só nos `.env` de
+  produção do CT 116 (`/root/leia/*.env`), que continuam como estão e não leem do 1Password.
 - `LEIA_HOMELAB_PG_PASSWORD` / `LEIA_HOMELAB_DIRECTUS_PASSWORD` seguem como variáveis de usuário do Windows.
 
 ## Sincronização das tarefas com o Linear
@@ -127,6 +138,22 @@ do Beads continuam como issues-pai dentro do projeto.
   `ready-for-human`, `wontfix`). Tipos (`task`, `feature`) não viram rótulo; épicos viram issue-pai.
 - Comentários, anexos e dependências não sincronizam.
 - Issue criada direto no Linear entra no Beads na próxima sincronização.
+
+## Postgres de produção
+
+| Peça | Onde |
+|---|---|
+| Banco `leia_lab` (Leia **e** Directus, que dividem o banco) | CT 116, container `leia-lab-postgres`, `192.168.0.120:5432` |
+| Tabelas | da Leia: `analyses`, `analysis_trail`, a matriz (`risk_matrix`) e o histórico `domain_history`; as demais do domínio estão em `src/db/schema.sql` |
+| Como chegar | pelo `pve` (`192.168.0.9` na LAN, `100.101.28.59` no Tailscale): `ssh pve "pct exec 116 -- docker exec leia-lab-postgres psql -U leia -d leia_lab"` |
+| Leitura segura | `default_transaction_read_only=on` antes de ler |
+
+## Minutas de teste e textos do gold
+
+`leia-minutas-teste-mascaradas/` (git-ignored, `LEIA_MINUTAS_DIR`): as minutas de teste já mascaradas e
+os textos do conjunto gold. Nunca commitados ou enviados; existem por máquina — hoje no checkout Windows
+(`C:\Users\Vitor\dev\leia-lab`) e na VPS (`/data/projects/leia-lab`). O gold roda contra elas
+(`src/eval/gold.py`, `gold-run`/`gold-compare` no CLI).
 
 ## Backup e restore do Postgres
 
