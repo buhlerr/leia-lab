@@ -86,9 +86,14 @@ op run --env-file=.env.op -- scripts/linear-sync.sh --dry-run   # ver antes
 op run --env-file=.env.op -- scripts/linear-sync.sh             # sincronizar
 ```
 
-O script faz três passos: puxa tudo do Linear, envia as tarefas abertas e envia as fechadas que já estão
-no Linear (para irem a Done lá). **Não rode `bd linear sync` puro:** ele enviaria as 62 tarefas fechadas
-antes do espelho, que ficam só no Beads.
+O script faz quatro passos: puxa tudo do Linear, envia as tarefas abertas, envia as fechadas que já estão
+no Linear (para irem a Done lá) e põe no projeto **`leia-lab`** do Linear toda issue deste repo que esteja
+sem projeto (`scripts/linear_project.py`; o `bd` não sabe de projetos). **Não rode `bd linear sync` puro:**
+ele enviaria as 62 tarefas fechadas antes do espelho, que ficam só no Beads. Não use `linear.project_id`:
+no `bd` ele restringe a sincronização a um projeto e bloqueia a criação de issues novas.
+
+Um projeto do Linear por repositório: outro repo no mesmo time ganha o seu projeto e passa o nome dele ao
+`linear_project.py`. Os épicos do Beads continuam como issues-pai dentro do projeto.
 
 - Estados: `open` → Todo, `in_progress` → In Progress, `closed` → Done. Na volta, Backlog e Todo viram
   `open`, In Progress e In Review viram `in_progress`, Done, Canceled e Duplicate viram `closed`.

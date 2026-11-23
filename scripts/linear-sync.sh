@@ -19,3 +19,6 @@ print(",".join(i["id"] for i in json.load(sys.stdin) if "linear.app" in (i.get("
 if [ -n "$closed" ]; then
   "$BD" linear sync --push --issues "$closed" "$@"
 fi
+
+# 4. Projeto: toda issue deste repo fica no projeto leia-lab do Linear (o bd nao sabe de projetos).
+"$BD" list --all --json | python3 -I scripts/linear_project.py leia-lab "$@"
