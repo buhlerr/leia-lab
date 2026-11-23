@@ -9,6 +9,11 @@ le e mascara FORA do grafo, entao nenhum checkpointer, stream ou rastreador rece
 O estado nao tem ``raw_text`` nem ``file_path``, e ``iniciar`` recusa texto que nao esteja mascarado.
 Quem envolver o grafo (rastreio, API) tem de chamar ``analyze()``, nunca ``graph.ainvoke`` com texto cru.
 
+Ciclo de vida: ``analyze``/``analyze_stream`` sao os donos da linha de ``analyses``. Criam o
+``analysis_id`` antes de o grafo rodar, ``iniciar`` insere a linha com ele, e qualquer interrupcao
+(excecao ou cancelamento, em qualquer ponto) termina a linha como 'failed' com so o TIPO do erro.
+Modelo verificado: ``.claude/skills/verify-analysis-lifecycle``.
+
 Regras: tipos, temas, matriz de riscos e prompts NAO sao argumentos nem constantes. ``iniciar`` le uma
 foto atomica das tabelas de dominio (``load_rules_snapshot``) e grava a analise com ela; o resto do
 grafo usa so essa foto. Cada passo acrescenta um registro a ``analysis_trail``: um ``analysis_id``
@@ -20,9 +25,11 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import uuid
 import weakref
 from collections.abc import AsyncIterator
-from functools import wraps
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
@@ -32,7 +39,7 @@ from langgraph.graph import END, START, StateGraph
 from src.clients.jev import call_jev
 from src.clients.llm import chat_completion
 from src.config import Settings
-from src.db.analyses import append_trail, finish_analysis, start_analysis
+from src.db.analyses import append_trail, fail_analysis, finish_analysis, start_analysis
 from src.db.rules import load_rules_snapshot
 from src.graphs.ingest_graph import _read_path
 from src.graphs.minuta_rules import (
@@ -46,7 +53,9 @@ from src.rag.hybrid_search import hybrid_search_rrf
 from src.tracing import tag_analysis
 
 _EMPTY_TEXT_MSG = "text must be a non-empty string"
-_UNMASKED_MSG = "graph input needs masked 'text'; use analyze()/prepare_input() (raw text never enters the graph)"
+_UNMASKED_MSG = (
+    "graph input needs masked 'text' and an 'analysis_id'; use analyze() (raw text never enters the graph)"
+)
 _CONCURRENCY = 8  # teto global de chamadas externas (Jev, LLM, embeddings) por loop
 _EXCERPT = 200  # caracteres do texto MASCARADO da clausula guardados na trilha
 
@@ -136,18 +145,43 @@ def _run_config(config: dict[str, Any] | None, inp: dict[str, str]) -> dict[str,
     return cfg
 
 
-async def analyze(graph: Any, *, config: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+@dataclass(frozen=True)
+class AnalyzeMinutaGraph:
+    """O grafo compilado e o pool em que ele grava: ``analyze`` precisa dos dois para terminar a linha."""
+
+    compiled: Any
+    pool: asyncpg.Pool
+
+
+@asynccontextmanager
+async def _owned_analysis(pool: asyncpg.Pool, inp: dict[str, str]) -> AsyncIterator[None]:
+    """Da a ``inp`` um ``analysis_id`` novo; se a execucao parar antes do fim, a linha termina 'failed'.
+
+    ``BaseException`` inclui o cancelamento (cliente que desconecta, timeout). O ``shield`` deixa a
+    escrita final chegar ao banco mesmo se outro cancelamento vier durante ela.
+    """
+    inp["analysis_id"] = str(uuid.uuid4())
+    try:
+        yield
+    except BaseException as e:
+        await asyncio.shield(fail_analysis(pool, inp["analysis_id"], e))
+        raise
+
+
+async def analyze(graph: AnalyzeMinutaGraph, *, config: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
     """``prepare_input`` + execucao do grafo; devolve o estado final."""
     inp = await prepare_input(**kwargs)
-    return await graph.ainvoke(inp, _run_config(config, inp))
+    async with _owned_analysis(graph.pool, inp):
+        return await graph.compiled.ainvoke(inp, _run_config(config, inp))
 
 
 async def analyze_stream(
-    graph: Any, *, config: dict[str, Any] | None = None, stream_mode: str = "updates", **kwargs: Any
+    graph: AnalyzeMinutaGraph, *, config: dict[str, Any] | None = None, stream_mode: str = "updates", **kwargs: Any
 ) -> AsyncIterator[Any]:
     inp = await prepare_input(**kwargs)
-    async for chunk in graph.astream(inp, _run_config(config, inp), stream_mode=stream_mode):
-        yield chunk
+    async with _owned_analysis(graph.pool, inp):
+        async for chunk in graph.compiled.astream(inp, _run_config(config, inp), stream_mode=stream_mode):
+            yield chunk
 
 
 def build_analyze_minuta_graph(
@@ -160,7 +194,7 @@ def build_analyze_minuta_graph(
     norm_cutoff: float = 0.3,
     max_clauses: int = 45,
     checkpointer: Any = None,
-) -> Any:
+) -> AnalyzeMinutaGraph:
     """Compila o grafo de analise de minuta (roteamento condicional pos-classificacao).
 
     Regras nao sao argumentos: sao lidas do banco no inicio de cada analise (no ``iniciar``).
@@ -196,55 +230,25 @@ def build_analyze_minuta_graph(
     async def rec(state: AnalyzeMinutaState, steps: list[dict[str, Any]]) -> None:
         await append_trail(pool, state["analysis_id"], state["rules_meta"], steps)
 
-    def guarded(fn: Any) -> Any:
-        """Se um no falha, a analise fica 'failed' com o TIPO do erro (nunca a mensagem: pode ter texto)."""
-
-        @wraps(fn)
-        async def inner(state: AnalyzeMinutaState) -> dict[str, Any]:
-            try:
-                return await fn(state)
-            except Exception as e:
-                if state.get("analysis_id"):
-                    await finish_analysis(
-                        pool,
-                        state["analysis_id"],
-                        status="failed",
-                        minuta_type=state.get("tipo"),
-                        report={"error": type(e).__name__, "step": fn.__name__},
-                    )
-                raise
-
-        return inner
-
     async def iniciar(state: AnalyzeMinutaState) -> dict[str, Any]:
         text = state.get("text")
+        aid = state.get("analysis_id")
         # Mascarar e idempotente: texto que muda ao ser mascarado de novo nao passou por prepare_input.
-        if not isinstance(text, str) or not text.strip() or mask_personal_data(text) != text:
+        # Sem analysis_id a execucao nao veio de analyze(), e ninguem terminaria a linha se ela parasse.
+        if not isinstance(text, str) or not text.strip() or mask_personal_data(text) != text or not aid:
             raise ValueError(_UNMASKED_MSG)
         alias = state.get("filename", "")
         # Falha alto aqui (RulesConfigError), antes de qualquer chamada externa, se faltar regra.
         snap = await load_rules_snapshot(pool)
-        aid = await start_analysis(pool, snap, filename_alias=alias, masked_text=text, params=params)
-        tag_analysis(str(aid))  # amarra o traco (LangSmith/MLflow) a esta analise; no-op sem rastreio
+        await start_analysis(pool, snap, analysis_id=aid, filename_alias=alias, masked_text=text, params=params)
+        tag_analysis(aid)  # amarra o traco (LangSmith/MLflow) a esta analise; no-op sem rastreio
         meta = {
             "hash": snap.hash,
             "matrix_version": snap.matrix_version,
             "prompt_version": snap.prompt_version,
             "history_id": snap.history_id,
         }
-        await append_trail(
-            pool,
-            aid,
-            meta,
-            [
-                {
-                    "step": "iniciar",
-                    "input_summary": {"filename_alias": alias, "masked_chars": len(text)},
-                    "decision": {"rules_hash": snap.hash, "domain_history_id": snap.history_id, "params": params},
-                }
-            ],
-        )
-        return {"analysis_id": str(aid), "rules": snap.content, "rules_meta": meta}
+        return {"rules": snap.content, "rules_meta": meta}
 
     async def classificar(state: AnalyzeMinutaState) -> dict[str, Any]:
         types = state["rules"]["types"]
@@ -601,7 +605,7 @@ def build_analyze_minuta_graph(
         ("analisar", analisar),
         ("validar", validar),
     ]:
-        builder.add_node(name, guarded(fn))
+        builder.add_node(name, fn)
     builder.add_edge(START, "iniciar")
     builder.add_edge("iniciar", "classificar")
     builder.add_conditional_edges("classificar", route_after_classificar, {"ficha": "ficha", "validar": "validar"})
@@ -610,4 +614,4 @@ def build_analyze_minuta_graph(
     builder.add_edge("buscar", "analisar")
     builder.add_edge("analisar", "validar")
     builder.add_edge("validar", END)
-    return builder.compile(checkpointer=checkpointer)
+    return AnalyzeMinutaGraph(compiled=builder.compile(checkpointer=checkpointer), pool=pool)
