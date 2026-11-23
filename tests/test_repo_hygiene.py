@@ -153,10 +153,10 @@ def broken_cited_paths(cwd: Path = REPO) -> list[tuple[str, str]]:
             if first not in CITED_IGNORED_ROOTS and token not in BD_EXPORTS and not (cwd / token).exists():
                 broken.append((rel_md, token))
         for target in LINK.findall(text):
-            if NOT_A_PATH.search(target):
-                continue
             rel = target.split("#", 1)[0]
-            if rel and not (cwd / rel_md).parent.joinpath(rel).exists():
+            if not rel or NOT_A_PATH.search(rel):
+                continue
+            if not (cwd / rel_md).parent.joinpath(rel).exists():
                 broken.append((rel_md, target))
     return broken
 

@@ -99,7 +99,7 @@ It stops the admin server this run started (by the recorded PID, `taskkill /T`),
 
 ## Helpers
 
-`scripts/verify.py` (stdlib + the repo's `.venv`, which has asyncpg). Always invoke it with `.venv/Scripts/python.exe`. Subcommands, all taking `--run-id ID`:
+`.claude/skills/verify-leia-lab/scripts/verify.py` (stdlib + the repo's `.venv`, which has asyncpg). Always invoke it with `.venv/Scripts/python.exe`. Subcommands, all taking `--run-id ID`:
 
 | Subcommand | Does |
 |---|---|

@@ -51,7 +51,7 @@ O G2 foi decidido em 2026-11-16, com os números da B3/B4 à vista.
 | Esforço de entrega da gestão | Django: relógio do agente ~20 min até a tela útil (exclui a base F). Directus: ~5 min para apontar o banco **+ ~40 min / ~15 chamadas de API** de configuração manual (coleção, relação, interface, display) que **não está no git** | B4 (+ comentário de correção) |
 | Histórico e deleção | DELETE do histórico negado nas duas ferramentas (grant + gatilho) | B4 |
 | Gabarito compara versões | `gold-run` v1 → editar R-04 → v2 → `gold-compare`; `matrix_version 0801… → d380…` com rastreio ligado | F, B3 |
-| Nenhum texto cru sai | servidor local captura os payloads: PII da minuta sintética ausente, texto mascarado presente | B3, `tests/test_tracing_privacy.py` |
+| Nenhum texto cru sai | servidor local captura os payloads: PII da minuta sintética ausente, texto mascarado presente | B3, hoje `tests/test_tracing.py` |
 | Licença | Django BSD-3 vs Directus MSCL (grátis só < US$ 5 mi e < 50 pessoas) | pesquisa §4.5, §9.6 |
 
 **Preço:** a vantagem de ~10× da LangSmith não vem do tamanho do plano, vem da **unidade cobrada** (traço = árvore inteira). Medido com a mesma minuta real.
@@ -71,7 +71,7 @@ Fica registrado o único ponto em que essa combinação venceria: **dado no Bras
 
 ### Combinação 3 — LangGraph + Langfuse + Django Admin
 
-Combina MIT + BSD e usa a gestão escolhida. Saiu por inferência (a pesquisa já a marcava como "não prototipar"): o rastreio seria o Langfuse, com a margem menor e o custo de operar ClickHouse. **Não** está descartada como caminho de saída: é a troca de menor atrito se a LangSmith ficar cara ou inaceitável por LGPD — custa uma variável de ambiente e o `src/tracing/` da B3.
+Combina MIT + BSD e usa a gestão escolhida. Saiu por inferência (a pesquisa já a marcava como "não prototipar"): o rastreio seria o Langfuse, com a margem menor e o custo de operar ClickHouse. **Não** está descartada como caminho de saída: é a troca de menor atrito se a LangSmith ficar cara ou inaceitável por LGPD — custa uma variável de ambiente e o que a B3 deixou pronto em `src/tracing.py`.
 
 ### Combinação 4 — LangGraph + MLflow (self-host)
 
@@ -132,7 +132,7 @@ Descartado na pesquisa: RBAC ausente no OSS, histórico de falhas críticas e vo
 
 Baixo, e é parte do motivo da escolha:
 
-- **Rastreio:** desligar a LangSmith é remover variáveis de ambiente. Trocar para Langfuse ou Phoenix é reinstalar `src/tracing/` da B3 (já escrito e testado).
+- **Rastreio:** desligar a LangSmith é remover variáveis de ambiente. Trocar para Langfuse ou Phoenix é reaproveitar o que a B3 deixou pronto em `src/tracing.py` (já escrito e testado).
 - **Gestão:** o Django Admin é um app isolado (`src/management/`) sobre tabelas que existem independentemente dele. Removê-lo não toca nas tabelas nem na trilha; o Directus pode ser reapontado ao mesmo banco a qualquer momento.
 - **Motor:** é o que já está em `master`; não há reescrita a desfazer.
 - **O que é caro reverter:** a trilha *append-only* e o snapshot por análise, porque são **decisão de dados** (já implementados na F), não de ferramenta. Nenhuma alternativa os dispensa.
@@ -157,10 +157,10 @@ flowchart LR
 
 | Fase | Escopo | Reaproveita | Pronto quando | Risco principal |
 |---|---|---|---|---|
-| **M1 — Esquema de domínio** | `src/foundation/schema.sql` → `src/db/` como migração de verdade: `minuta_types`, `themes`, `risk_matrix`, `prompts`, `domain_history`, `analyses`, `analysis_trail`; papéis `leia_app` + login próprio; gatilhos `domain_history_log`, `forbid_change`, `analyses_guard`; carga inicial a partir de `DEFAULT_RISCOS`/`DEFAULT_TEMAS` | F (`schema.sql`, `seed.py`) | um banco criado do zero pelo caminho do repo tem as 7 tabelas, os gatilhos e o seed; DELETE no histórico falha | Migração em produção não pode ser `schema.sql` idempotente; precisa de ferramenta de migração (a decidir) |
+| **M1 — Esquema de domínio** | o `schema.sql` da F → `src/db/schema.sql` como migração de verdade: `minuta_types`, `themes`, `risk_matrix`, `prompts`, `domain_history`, `analyses`, `analysis_trail`; papéis `leia_app` + login próprio; gatilhos `domain_history_log`, `forbid_change`, `analyses_guard`; carga inicial a partir de `DEFAULT_RISCOS`/`DEFAULT_TEMAS` | F (`schema.sql`, `seed.py`) | um banco criado do zero pelo caminho do repo tem as 7 tabelas, os gatilhos e o seed; DELETE no histórico falha | Migração em produção não pode ser `schema.sql` idempotente; precisa de ferramenta de migração (a decidir) |
 | **M2 — Grafo lê do banco** | `build_analyze_minuta_graph(pool, settings, …)` lendo tipos/temas/matriz/prompts; `REPEATABLE READ` + snapshot com hash em `analyses`; `matrix_version`/`prompt_version` por conteúdo; `analysis_trail` por passo; **`raw_text` fora do estado** | F (`rules.py`, `trail.py`, `analyze_minuta_graph.py`, `test_foundation_privacy.py`) | uma análise antiga continua mostrando a regra que a decidiu **depois** de a matriz mudar, e a varredura de estado/checkpoint/trilha não acha PII | É a maior mudança de código da migração; o grafo deixa de ter `DEFAULT_*` e falha alto se faltar prompt |
 | **M3 — Django Admin** | `src/management/` no repo: `models managed=False`, `ModelAdmin` das 4 tabelas de domínio com inlines, `domain_history`/`analyses`/`analysis_trail` **read-only**; base normativa com upload + reindexação; `django`/`psycopg`/`gunicorn` no `pyproject`; grupos de permissão (editor × leitor) | B4 (`src/management/`, 11 testes) | um não-desenvolvedor edita risco, tema e prompt; a próxima análise usa; o histórico registra o login dele | Auth e deploy: o protótipo usou superusuário e gunicorn sem TLS |
-| **M4 — Rastreio e avaliação** | `src/tracing/` da B3 no repo (LangSmith por env var, `--trace`), prova de privacidade rodando na suíte de testes; `gold-run`/`gold-compare` como rotina; **primeira medição com `TYPESAFE_API_KEY`** e minutas reais mascaradas; conferir billing (sub-run) | B3 (todo o `src/tracing/` + `tests/test_tracing_privacy.py`), F (`gold.py`) | traços aparecem na LangSmith sem PII; o gabarito produz P/R/F1 comparável entre duas versões; o consumo real do mês confere com "1 traço/análise" | **Risco 1** (sub-run) e **risco 4** (qualidade) — os dois só fecham aqui |
+| **M4 — Rastreio e avaliação** | o tracing da B3 no repo (`src/tracing.py`, LangSmith por env var, `--trace`), prova de privacidade rodando na suíte de testes; `gold-run`/`gold-compare` como rotina; **primeira medição com `TYPESAFE_API_KEY`** e minutas reais mascaradas; conferir billing (sub-run) | B3 (branch `prototype/tracing`; a prova de privacidade hoje é `tests/test_tracing.py`), F (`gold.py`) | traços aparecem na LangSmith sem PII; o gabarito produz P/R/F1 comparável entre duas versões; o consumo real do mês confere com "1 traço/análise" | **Risco 1** (sub-run) e **risco 4** (qualidade) — os dois só fecham aqui |
 | **M5 — Dados reais** | Matriz de 185 riscos e base normativa **versionadas no repo**; corrigir `load_risk_matrix` para o formato `{norma, artigo}` (bead `leia-lab-vz3`); decidir o formato de versionamento (JSONL? seed? migração de dados?) | F (`init --matrix`, `normalize_norm`) | `init` do repo reproduz a análise de produção sem depender de pasta local fora do git | Ponto em aberto da ADR-0001: o **formato** não está decidido; e a matriz real não pode virar dado público sem revisão |
 | **M6 — Endurecimento** | TLS e autenticação do admin; backup/restore do Postgres com prova de restore; política de acesso aos traços; `ingest_graph` sem `raw_text` (bead `leia-lab-8wy`); limites de plano monitorados | B4 deploy, F | restore testado; admin só por HTTPS; nenhum grafo carrega texto cru no estado | Não é protótipo: cada item aqui atrasa o "pronto para uso" |
 

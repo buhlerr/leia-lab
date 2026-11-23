@@ -45,6 +45,9 @@ item `Pangolin API Key - leialab` do cofre `DEV`) só vale para eles.
 Passar o token ao FE: `ssh root@192.168.0.9 pct exec 116 -- grep LEIA_API_TOKEN /root/leia/api.env`. Para
 trocar o token, edite o `api.env` e rode `docker compose up -d --no-deps api`.
 
+Superfície: contrato OpenAPI em `/docs`; `GET /v1/analyses/{id}` devolve o relatório e a trilha.
+A API não tem rota que liste análises.
+
 Atualizar a API para um commit novo (o admin não é tocado):
 
 ```bash
@@ -117,6 +120,14 @@ do Beads continuam como issues-pai dentro do projeto.
   `ready-for-human`, `wontfix`). Tipos (`task`, `feature`) não viram rótulo; épicos viram issue-pai.
 - Comentários, anexos e dependências não sincronizam.
 - Issue criada direto no Linear entra no Beads na próxima sincronização.
+
+## Postgres de produção
+
+| Peça | Onde |
+|---|---|
+| Banco `leia_lab` (Leia **e** Directus, que dividem o banco) | CT 116, container `leia-lab-postgres`, `192.168.0.120:5432` |
+| Como chegar | pelo `pve` (`192.168.0.9` na LAN, `100.101.28.59` no Tailscale): `ssh pve "pct exec 116 -- docker exec leia-lab-postgres psql -U leia -d leia_lab"` |
+| Leitura segura | `default_transaction_read_only=on` antes de ler |
 
 ## Backup e restore do Postgres
 
