@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 import uuid
 import weakref
@@ -173,18 +174,42 @@ class AnalyzeMinutaGraph:
     pool: asyncpg.Pool
 
 
+logger = logging.getLogger(__name__)
+
+_FAILURE_WRITE_TIMEOUT = 10.0  # s: banco travado nao pode segurar o cancelamento para sempre
+
+
 @asynccontextmanager
 async def _owned_analysis(pool: asyncpg.Pool, inp: dict[str, str]) -> AsyncIterator[None]:
     """Da a ``inp`` um ``analysis_id`` novo; se a execucao parar antes do fim, a linha termina 'failed'.
 
-    ``BaseException`` inclui o cancelamento (cliente que desconecta, timeout). O ``shield`` deixa a
-    escrita final chegar ao banco mesmo se outro cancelamento vier durante ela.
+    ``BaseException`` inclui o cancelamento (cliente que desconecta, timeout) e o ``GeneratorExit``
+    (quem consome ``analyze_stream`` parou cedo). A escrita de falha e ``shield`` contra o PRIMEIRO
+    cancelamento; um segundo durante ela e ADIADO ate a linha virar 'failed' -- ``analyze()`` nunca
+    termina antes da escrita. Banco que nao responde em ``_FAILURE_WRITE_TIMEOUT`` solta o pedido:
+    a linha pode ficar 'running' (visivel no banco) e o aviso vai ao log.
     """
     inp["analysis_id"] = str(uuid.uuid4())
     try:
         yield
     except BaseException as e:
-        await asyncio.shield(fail_analysis(pool, inp["analysis_id"], e))
+        write = asyncio.ensure_future(
+            asyncio.wait_for(fail_analysis(pool, inp["analysis_id"], e), _FAILURE_WRITE_TIMEOUT)
+        )
+        try:
+            await asyncio.shield(write)
+        except asyncio.CancelledError:
+            while not write.done():  # 2o..enesimo cancelamento: absorve ate a escrita terminar
+                try:
+                    await asyncio.shield(write)
+                except asyncio.CancelledError:
+                    pass
+        except asyncio.TimeoutError:
+            logger.warning(
+                "analysis %s: a escrita de falha nao terminou em %.0fs; a linha pode seguir 'running'",
+                inp["analysis_id"],
+                _FAILURE_WRITE_TIMEOUT,
+            )
         raise
 
 

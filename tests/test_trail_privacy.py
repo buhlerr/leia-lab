@@ -218,3 +218,59 @@ async def test_a_cancelled_analysis_ends_failed(seeded, settings, monkeypatch):
     row, steps = await _only_analysis(seeded)
     assert (row["status"], row["report"], steps) == ("failed", {"error": "CancelledError"}, ["iniciar"])
     assert row["finished_at"] is not None
+
+
+async def test_a_second_cancel_during_the_failure_write_still_ends_the_row_failed(seeded, settings, monkeypatch):
+    """2o cancelamento durante a escrita de falha: analyze() so termina DEPOIS da linha virar 'failed'."""
+    handler_started = asyncio.Event()
+    real_fail = mod.fail_analysis
+
+    async def slow_fail(pool, analysis_id, error):
+        handler_started.set()
+        await asyncio.sleep(0.05)  # janela em que o 2o cancelamento chega durante a escrita
+        await real_fail(pool, analysis_id, error)
+
+    monkeypatch.setattr(mod, "fail_analysis", slow_fail)
+    calling = asyncio.Event()
+
+    async def hang(*a, **k):
+        calling.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(mod, "call_jev", hang)
+    run = asyncio.create_task(analyze(build_analyze_minuta_graph(seeded, settings), raw_text=RAW, filename=FILE_NAME))
+    await calling.wait()
+    run.cancel()
+    await handler_started.wait()  # a escrita de falha comecou: o 2o cancelamento chega AQUI
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run
+    row, steps = await _only_analysis(seeded)
+    assert (row["status"], row["report"], steps) == ("failed", {"error": "CancelledError"}, ["iniciar"])
+    assert row["finished_at"] is not None
+
+
+async def test_a_failure_write_that_never_returns_releases_the_request(seeded, settings, monkeypatch, caplog):
+    """Banco travado na escrita de falha: o pedido termina com aviso, em vez de pendurar para sempre."""
+    handler_started = asyncio.Event()
+
+    async def stuck_fail(pool, analysis_id, error):
+        handler_started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(mod, "fail_analysis", stuck_fail)
+    monkeypatch.setattr(mod, "_FAILURE_WRITE_TIMEOUT", 0.05)
+    calling = asyncio.Event()
+
+    async def hang(*a, **k):
+        calling.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(mod, "call_jev", hang)
+    run = asyncio.create_task(analyze(build_analyze_minuta_graph(seeded, settings), raw_text=RAW, filename=FILE_NAME))
+    await calling.wait()
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):  # sem o teto, este await pendurava para sempre
+        await asyncio.wait_for(run, timeout=2)
+    assert handler_started.is_set()
+    assert "a escrita de falha nao terminou" in caplog.text

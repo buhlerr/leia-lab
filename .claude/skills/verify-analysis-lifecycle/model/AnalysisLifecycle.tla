@@ -20,19 +20,25 @@
 (*              runs, iniciar inserts the row and its iniciar trail entry  *)
 (*              in one transaction, and any BaseException ends the row     *)
 (*              failed through a shielded UPDATE ... WHERE status =        *)
-(*              'running'. The trigger freezes a finished row.             *)
+(*              'running'. The trigger freezes a finished row. A second     *)
+(*              cancellation while that write is pending is DEFERRED       *)
+(*              (DeferCancel = TRUE): analyze() only ends after the row     *)
+(*              is failed. Without the deferral the outer await raises      *)
+(*              first, and the row stays 'running' with an orphan write.    *)
 (*   "fixed_*"  the fixed design with one safeguard removed, to show that  *)
 (*              each property can fail.                                    *)
 (* Assumption: the failure UPDATE reaches Postgres (the DB is up). A dead  *)
-(* database cannot be written, by this or any design.                      *)
+(* database cannot be written, by this or any design; the code bounds the  *)
+(* cleanup wait and gives up with a warning, outside the model.            *)
 (***************************************************************************)
 EXTENDS Naturals, Sequences
 
-CONSTANT Design
+CONSTANT Design, DeferCancel
 
 Designs == {"current", "fixed", "fixed_catches_exception_only", "fixed_split_iniciar",
             "fixed_unguarded_failure"}
 ASSUME Design \in Designs
+ASSUME DeferCancel \in BOOLEAN
 
 Terminal == {"done", "unsupported", "failed"}
 Statuses == {"none", "running"} \cup Terminal   \* "none": no row inserted yet
@@ -81,9 +87,10 @@ VARIABLES pc,      \* index of the next await point in P
           owned,   \* analyze() holds the analysis_id inside its try
           path,    \* classificar's verdict: supported minuta or not
           result,  \* how analyze() ended: "returned" or "raised"
-          event    \* what the last step did, for reading a counterexample
+          event,   \* what the last step did, for reading a counterexample
+          write    \* the failure write in the handler: not begun / pending / settled
 
-vars == <<pc, phase, row, trail, owned, path, result, event>>
+vars == <<pc, phase, row, trail, owned, path, result, event, write>>
 
 P == Program(path)
 
@@ -118,6 +125,7 @@ TypeOK ==
     /\ owned \in BOOLEAN
     /\ path \in {"suportado", "nao_suportado"}
     /\ result \in {"running", "returned", "raised"}
+    /\ write \in {"none", "pending", "done"}
 
 Init ==
     /\ pc = 1
@@ -128,6 +136,7 @@ Init ==
     /\ path \in {"suportado", "nao_suportado"}
     /\ result = "running"
     /\ event = "start"
+    /\ write = "none"
 
 Proceed ==
     /\ phase = "run"
@@ -138,7 +147,7 @@ Proceed ==
         /\ phase' = IF pc = Len(P) THEN "end" ELSE "run"
         /\ result' = IF pc = Len(P) THEN "returned" ELSE result
         /\ event' = ins.what \o ": ok"
-        /\ UNCHANGED path
+        /\ UNCHANGED <<path, write>>
 
 Fault ==
     /\ phase = "run"
@@ -150,21 +159,41 @@ Fault ==
             /\ event' = ins.what \o (IF committed THEN ": committed, then " ELSE ": ")
                         \o (IF e = "error" THEN "raised" ELSE "cancelled")
                         \o (IF Catches(ins, e) THEN " (caught)" ELSE " (not caught)")
-            /\ UNCHANGED <<pc, owned, path>>
+            /\ UNCHANGED <<pc, owned, path, write>>
 
 MarkFailed ==
-    /\ phase = "handler"
+    /\ phase = "handler" /\ write = "none"
+    /\ write' = "pending"
+    /\ event' = "failure write: begins"
+    /\ UNCHANGED <<pc, phase, row, trail, owned, path, result>>
+
+SecondCancel ==
+    \* A 2nd cancellation lands while the shielded failure write is pending.
+    /\ phase = "handler" /\ write = "pending"
+    /\ IF DeferCancel
+       THEN /\ event' = "2nd cancel during the failure write (deferred)"
+            /\ UNCHANGED <<pc, phase, row, trail, owned, path, result, write>>
+       ELSE /\ phase' = "end"          \* the outer await raised before the write settled;
+            /\ write' = "pending"      \* the row is left as it is, the write runs orphaned
+            /\ result' = "raised"
+            /\ event' = "2nd cancel during the failure write: analyze() ended first"
+            /\ UNCHANGED <<pc, row, trail, owned, path>>
+
+WriteSettles ==
+    \* The shielded UPDATE commits, is a no-op, or the trigger rejects it.
+    /\ phase = "handler" /\ write = "pending"
     /\ row' = CASE row = "none" -> "none"                              \* UPDATE matches no row
                 [] GuardedFailure -> IF row = "running" THEN "failed" ELSE row
                 [] TriggerFreezesTerminal /\ row \in Terminal -> row   \* trigger rejects the UPDATE
                 [] OTHER -> "failed"
+    /\ write' = "done"
     /\ phase' = "end"
     /\ event' = "failure write: status " \o row'
     /\ UNCHANGED <<pc, trail, owned, path, result>>
 
 Finished == phase = "end" /\ UNCHANGED vars
 
-Next == Proceed \/ Fault \/ MarkFailed \/ Finished
+Next == Proceed \/ Fault \/ MarkFailed \/ SecondCancel \/ WriteSettles \/ Finished
 
 Spec == Init /\ [][Next]_vars
 

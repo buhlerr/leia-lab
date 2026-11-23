@@ -35,6 +35,7 @@ if [[ ! -f "$jar" || "$(sha256_of "$jar")" != "$TLA_SHA256" ]]; then
 fi
 
 meta="$(mktemp -d)"
+trap 'rm -rf "$meta"' EXIT
 tlc() {
     (cd "$here/model" && "$java_bin" -XX:+UseParallelGC -cp "$jar" tlc2.TLC -nowarning -workers 1 \
         -metadir "$meta/$1" -config "$1.cfg" AnalysisLifecycle.tla)
@@ -53,6 +54,7 @@ checks=(
     "fixed_catches_exception_only:NoRunEndsRunning"
     "fixed_split_iniciar:TrailStartsWithIniciar"
     "fixed_unguarded_failure:TerminalNeverChanges"
+    "fixed_no_defer:NoRunEndsRunning"
 )
 bad=0
 for c in "${checks[@]}"; do
