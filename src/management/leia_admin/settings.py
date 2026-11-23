@@ -2,8 +2,9 @@
 
 Variaveis de ambiente:
 * ``DATABASE_URL``: postgresql://usuario:senha@host:porta/banco. Em producao, um login PROPRIO
-  (ex.: ``django_login``) membro de ``leia_app``: assim ``domain_history.db_user`` distingue o admin
-  de outras ferramentas, e o login nao e dono das tabelas de dominio.
+  (ex.: ``django_login``) membro de ``leia_app``, o papel que edita a matriz: assim
+  ``domain_history.db_user`` distingue o admin de outras ferramentas, e o login nao e dono das
+  tabelas de dominio. O papel da API e outro, ``leia_api`` (inventario em docs/OPERACAO.md).
 * ``DJANGO_SECRET_KEY``: obrigatoria, exceto com ``DJANGO_DEBUG=true`` ou rodando os testes.
 * ``DJANGO_ALLOWED_HOSTS``: lista separada por virgula (padrao: so localhost).
 * ``DJANGO_DEBUG``: ``true`` so em desenvolvimento.

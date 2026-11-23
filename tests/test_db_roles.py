@@ -13,7 +13,6 @@ import asyncpg
 import pytest
 
 from src.db.connection import init_db
-from tests.conftest import TEST_DATABASE_URL
 
 API_ROLE = "leia_api"
 READONLY_ROLE = "leia_readonly"
@@ -54,6 +53,27 @@ async def _is_group_role(pool, role: str) -> bool:
         "SELECT rolcanlogin, rolinherit FROM pg_roles WHERE rolname = $1", role
     )
     return row is not None and not row["rolcanlogin"] and row["rolinherit"]
+
+
+async def _seed_row(pool) -> None:
+    """Uma linha na matriz e uma análise, para os UPDATE/DELETE terem o que mirar."""
+    if await pool.fetchval("SELECT count(*) FROM risk_matrix") == 0:
+        tid = await pool.fetchval(
+            "INSERT INTO minuta_types (slug, name, classifier_description) VALUES ('t', 'T', 'd') RETURNING id"
+        )
+        theme_id = await pool.fetchval(
+            "INSERT INTO themes (minuta_type_id, slug) VALUES ($1, 'x') RETURNING id", tid
+        )
+        await pool.execute(
+            "INSERT INTO risk_matrix (theme_id, risk_id, description, criticality) "
+            "VALUES ($1, 'r', 'd', 'verde')",
+            theme_id,
+        )
+    if await pool.fetchval("SELECT count(*) FROM analyses") == 0:
+        await pool.execute(
+            "INSERT INTO analyses (filename_alias, text_sha256, rules_snapshot, rules_hash, matrix_version, "
+            "prompt_version, domain_history_id) VALUES ('documento-1.txt', 'h', '{}'::jsonb, 'rh', 'mv', 'pv', 0)"
+        )
 
 
 async def test_leia_api_has_exactly_the_analysis_grants(dpool):
@@ -160,24 +180,3 @@ async def test_leia_readonly_cannot_write_anything(dpool, sql):
                 await conn.execute(sql)
         finally:
             await conn.execute("RESET ROLE")
-
-
-async def _seed_row(pool) -> None:
-    """Uma linha na matriz e uma análise, para os UPDATE/DELETE terem o que mirar."""
-    if await pool.fetchval("SELECT count(*) FROM risk_matrix") == 0:
-        tid = await pool.fetchval(
-            "INSERT INTO minuta_types (slug, name, classifier_description) VALUES ('t', 'T', 'd') RETURNING id"
-        )
-        theme_id = await pool.fetchval(
-            "INSERT INTO themes (minuta_type_id, slug) VALUES ($1, 'x') RETURNING id", tid
-        )
-        await pool.execute(
-            "INSERT INTO risk_matrix (theme_id, risk_id, description, criticality) "
-            "VALUES ($1, 'r', 'd', 'verde')",
-            theme_id,
-        )
-    if await pool.fetchval("SELECT count(*) FROM analyses") == 0:
-        await pool.execute(
-            "INSERT INTO analyses (filename_alias, text_sha256, rules_snapshot, rules_hash, matrix_version, "
-            "prompt_version, domain_history_id) VALUES ('documento-1.txt', 'h', '{}'::jsonb, 'rh', 'mv', 'pv', 0)"
-        )

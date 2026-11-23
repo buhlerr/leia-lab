@@ -45,7 +45,7 @@ e a trilha** gravados na auditoria do Postgres.
 | Endereço | **https://leia-api.rauvbr.com** (Cloudflare Tunnel `homelab`), SSL, **sem Access**: a barreira é o bearer `LEIA_API_TOKEN` (o FE chama do servidor dele) |
 | Caminho | Cloudflare → túnel `homelab` (cloudflared no CT 103) → `192.168.0.120:8080` (CT 116) |
 | Serviço | `api` no `/root/leia/docker-compose.yml` (container `leia-api`, imagem `leia-api:<sha>`, build de `/root/leia/api`, separado do `management/` do admin), `entrypoint: python -m src.api`, healthcheck em `/healthz` |
-| Segredos | `/root/leia/api.env` (chmod 600): `DATABASE_URL` do login `api_login` (membro de `leia_app`, não dono) e `LEIA_API_TOKEN` (64 hex). Gerados no próprio CT, nunca impressos |
+| Segredos | `/root/leia/api.env` (chmod 600): `DATABASE_URL` do login `api_login` (membro de `leia_api`, o papel mínimo da API) e `LEIA_API_TOKEN` (64 hex). Gerados no próprio CT, nunca impressos |
 | Porta 8080 na LAN | **fechada**: mesma cadeia `LEIA-ADMIN` da 8000 (`deploy/firewall/`) |
 | Modelos | OpenRouter e TypeSafe em modo offline até as chaves entrarem (`leia-lab-8tr.9`); quando entrarem, vão no `api.env` |
 
@@ -147,6 +147,32 @@ do Beads continuam como issues-pai dentro do projeto.
 | Tabelas | da Leia: `analyses`, `analysis_trail`, a matriz (`risk_matrix`) e o histórico `domain_history`; as demais do domínio estão em `src/db/schema.sql` |
 | Como chegar | pelo `pve` (`192.168.0.9` na LAN, `100.101.28.59` no Tailscale): `ssh pve "pct exec 116 -- docker exec leia-lab-postgres psql -U leia -d leia_lab"` |
 | Leitura segura | `default_transaction_read_only=on` antes de ler |
+
+### Papéis de banco (VIT-22)
+
+Criados e concedidos pelo `src/db/schema.sql` (idempotente, versionado); logins pessoais recebem um
+papel por `GRANT`. Testado em `tests/test_db_roles.py`.
+
+| Papel | Pode | Quem o usa |
+|---|---|---|
+| `leia` (login) | tudo: é o dono das tabelas, roda `init`, aplica versões de dado | operação |
+| `leia_app` | escrita na matriz e no corpus, leitura do histórico; em `analyses` sem `DELETE`, em `analysis_trail` sem `UPDATE`/`DELETE` | `django_login` (admin) |
+| `leia_api` | leitura da matriz e do corpus; em `analyses` só `INSERT`/`SELECT`/`UPDATE` (o `UPDATE` é só o término — o gatilho `analyses_guard` congela o resto), em `analysis_trail` só `INSERT`/`SELECT` | `api_login` (API) |
+| `leia_readonly` | `SELECT` nas tabelas do domínio, nada mais | consultas |
+
+Deploy no CT 116 (roda **após o merge**, com o ok do dono — D2): nada de novo no dia a dia, o `init`
+do commit novo cria os papeis e os grants. Só o `api_login` muda de papel:
+
+```bash
+# 1. init com o DATABASE_URL do dono (leia), como em qualquer mudanca de schema.sql
+# 2. troca do papel do login da API (uma linha, reversivel):
+ssh pve "pct exec 116 -- docker exec leia-lab-postgres psql -U leia -d leia_lab \
+  -c 'GRANT leia_api TO api_login; REVOKE leia_app FROM api_login;'"
+# 3. docker compose restart api (recria as conexoes com o papel novo)
+```
+
+O `django_login` continua em `leia_app`, o papel que edita a matriz. Para dar a alguém só leitura:
+`GRANT leia_readonly TO <login>`.
 
 ## Minutas de teste e textos do gold
 

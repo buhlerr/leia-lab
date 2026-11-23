@@ -270,3 +270,27 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON kb_docs, kb_chunks TO leia_app;
 -- So as sequencias da Leia, nunca ALL SEQUENCES: o banco do homelab e compartilhado com o Directus.
 GRANT USAGE ON SEQUENCE minuta_types_id_seq, themes_id_seq, risk_matrix_id_seq, prompts_id_seq,
     analysis_trail_id_seq TO leia_app;
+
+-- ---------------------------------------------------------------- papeis minimos (VIT-22)
+-- leia_api: o que a API grava e le. A matriz e so leitura (quem edita e o admin, com leia_app);
+-- a analise e o unico caminho de escrita: INSERT da linha, UPDATE do termino (gatilho
+-- analyses_guard congela o resto) e INSERT da trilha, que e append-only por gatilho.
+-- leia_readonly: leitura do dominio inteiro, sem nenhuma escrita. Logins pessoais recebem
+-- um destes papeis (GRANT leia_api TO api_login); sao NOLOGIN de proposito.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'leia_api') THEN
+        CREATE ROLE leia_api NOLOGIN;   -- papel da API (api_login na producao)
+    END IF;
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'leia_readonly') THEN
+        CREATE ROLE leia_readonly NOLOGIN;  -- papel de consulta, sem escrita
+    END IF;
+END $$;
+GRANT USAGE ON SCHEMA public TO leia_api, leia_readonly;
+GRANT SELECT ON minuta_types, themes, risk_matrix, prompts, domain_history,
+    kb_docs, kb_chunks TO leia_api;
+GRANT SELECT, INSERT, UPDATE ON analyses TO leia_api;        -- UPDATE so do termino; o gatilho guarda o snapshot
+GRANT SELECT, INSERT ON analysis_trail TO leia_api;          -- sem UPDATE/DELETE: trilha append-only
+GRANT USAGE ON SEQUENCE analysis_trail_id_seq TO leia_api;
+GRANT SELECT ON minuta_types, themes, risk_matrix, prompts, domain_history, data_versions,
+    analyses, analysis_trail, kb_docs, kb_chunks TO leia_readonly;
