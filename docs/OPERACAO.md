@@ -74,22 +74,28 @@ op run --env-file=.env.op -- uv run python -m src.cli gold-run --label real-v1 -
 - Os `.env` de produção no CT 116 (`/root/leia/*.env`) continuam como estão; não leem do 1Password.
 - `LEIA_HOMELAB_PG_PASSWORD` / `LEIA_HOMELAB_DIRECTUS_PASSWORD` seguem como variáveis de usuário do Windows.
 
-## Espelho das tarefas no Linear
+## Sincronização das tarefas com o Linear
 
-O Beads é a fonte da verdade; o Linear (time `VIT`, workspace `rauvbr`) é uma vitrine com as tarefas
-abertas. A configuração (`linear.team_id`, `linear.state_map.*`, `linear.outbound_state_map.*`) fica no
-banco do Beads e viaja com `bd dolt push` / `bd dolt pull`.
+Beads e Linear (time `VIT`, workspace `rauvbr`) sincronizam nos dois sentidos: o que muda no Linear
+(fechar, reabrir, prioridade, título) chega ao Beads, e o Linear mostra as tarefas abertas. Em conflito,
+vence a edição mais recente. A configuração (`linear.team_id`, `linear.state_map.*`,
+`linear.outbound_state_map.*`) fica no banco do Beads e viaja com `bd dolt push` / `bd dolt pull`.
 
 ```bash
-op run --env-file=.env.op -- bd linear sync --push --state open --dry-run   # ver antes
-op run --env-file=.env.op -- bd linear sync --push --state open             # enviar
+op run --env-file=.env.op -- scripts/linear-sync.sh --dry-run   # ver antes
+op run --env-file=.env.op -- scripts/linear-sync.sh             # sincronizar
 ```
 
-- Estados: `open` → Todo, `in_progress` → In Progress, `closed` → Done.
+O script faz três passos: puxa tudo do Linear, envia as tarefas abertas e envia as fechadas que já estão
+no Linear (para irem a Done lá). **Não rode `bd linear sync` puro:** ele enviaria as 62 tarefas fechadas
+antes do espelho, que ficam só no Beads.
+
+- Estados: `open` → Todo, `in_progress` → In Progress, `closed` → Done. Na volta, Backlog e Todo viram
+  `open`, In Progress e In Review viram `in_progress`, Done, Canceled e Duplicate viram `closed`.
 - Rótulos de triagem existem no Linear (`needs-triage`, `needs-info`, `ready-for-agent`,
   `ready-for-human`, `wontfix`). Tipos (`task`, `feature`) não viram rótulo; épicos viram issue-pai.
 - Comentários, anexos e dependências não sincronizam.
-- A volta (Linear → Beads, `bd linear sync` sem `--push`) fica desligada até o dono pedir.
+- Issue criada direto no Linear entra no Beads na próxima sincronização.
 
 ## Backup e restore do Postgres
 
