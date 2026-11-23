@@ -251,8 +251,8 @@ class AnalysisAdmin(_ReadOnlyAdmin):
                     erro = "Token da API ausente (defina LEIA_API_TOKEN)."
                 else:
                     erro = str(body.get("message") or "API indisponível.")
-            form = None  # a chave deste envio já foi usada: tentar de novo é uma análise nova
-        if form is None or not form.is_bound:
+        if request.method != "POST" or form.is_valid():
+            # GET, ou a chave deste envio já foi à API: o próximo envio é uma análise nova
             form = NovaAnaliseForm(initial={"idempotency_key": uuid.uuid4()})
         context = {
             **self.admin_site.each_context(request),
