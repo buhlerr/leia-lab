@@ -110,6 +110,17 @@ def assign_project(all_beads: list[dict], dry_run: bool) -> list[str]:
     return sorted(i["identifier"] for i in loose)
 
 
+def unassign_created(before: list[dict], after: list[dict]) -> list[str]:
+    """O Linear atribui ao criador a issue criada pela chave de API, e a puxada levaria isso ao Beads,
+    onde um responsavel trava `bd ready --unassigned` e o `bd close` dos agentes. Tira so das recem-criadas:
+    uma atribuicao feita a mao no Linear continua valendo."""
+    unlinked = {b["id"] for b in before if "linear.app" not in (b.get("external_ref") or "")}
+    created = [m.group(1) for b in after if b["id"] in unlinked and (m := _IDENT.search(b.get("external_ref") or ""))]
+    for ident in created:
+        gql("mutation($id: String!) { issueUpdate(id: $id, input: {assigneeId: null}) { success } }", {"id": ident})
+    return created
+
+
 def main() -> None:
     dry_run = "--dry-run" in sys.argv[1:]
     extra = ["--dry-run"] if dry_run else []
@@ -127,7 +138,9 @@ def main() -> None:
     if pending:
         print(f"Enviando {len(pending)} bead(s): {', '.join(pending)}")
         bd("linear", "sync", "--push", "--issues", ",".join(pending), *extra)
-        current = beads()
+        before, current = current, beads()
+        if not dry_run and (created := unassign_created(before, current)):
+            print(f"Sem responsavel no Linear (criadas agora): {', '.join(created)}")
     else:
         print("Beads sem mudancas desde a ultima rodada")
 
