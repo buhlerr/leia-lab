@@ -30,7 +30,7 @@ import asyncpg
 from langgraph.graph import END, START, StateGraph
 
 from src.clients.jev import call_jev
-from src.clients.llm import chat_completion
+from src.clients.llm import ChatResult, chat_completion
 from src.config import Settings
 from src.db.analyses import append_trail, finish_analysis, start_analysis
 from src.db.rules import load_rules_snapshot
@@ -188,10 +188,10 @@ def build_analyze_minuta_graph(
         async with _limiter():
             return await embed_text(text, cfg)
 
-    async def llm(system: str, user: str, model: str | None = None) -> tuple[str, int]:
+    async def llm(system: str, user: str, model: str | None = None) -> ChatResult:
         use = cfg.model_copy(update={"CHAT_MODEL": model}) if model else cfg
         async with _limiter():
-            return await chat_completion(system, user, use, temperature=0.1, max_tokens=900)
+            return await chat_completion(system, user, use, temperature=0.1, json_output=True)
 
     async def rec(state: AnalyzeMinutaState, steps: list[dict[str, Any]]) -> None:
         await append_trail(pool, state["analysis_id"], state["rules_meta"], steps)
@@ -529,11 +529,12 @@ def build_analyze_minuta_graph(
             )
             bruto = ""
             try:
-                bruto, used = await llm(redator["text"], msg, redator.get("model"))
+                r = await llm(redator["text"], msg, redator.get("model"))
+                bruto = r.text
                 m = re.search(r"\{.*\}", bruto, re.S)
                 if m is None:
                     raise ValueError("no json")
-                return json.loads(m.group(0)), bruto, used
+                return json.loads(m.group(0)), bruto, r.tokens
             except Exception as e:  # noqa: BLE001 - so o tipo, nunca a mensagem (pode conter texto)
                 return {"erro": type(e).__name__}, bruto, 0
 

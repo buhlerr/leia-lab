@@ -108,6 +108,7 @@ async def embed_text(text: str, settings: Settings | None = None) -> EmbeddingRe
         "model": settings.EMBEDDING_MODEL,
         "input": text,
         "dimensions": EMBEDDING_DIM,
+        "provider": {"data_collection": settings.OPENROUTER_DATA_COLLECTION},
     }
     headers = {"Authorization": f"Bearer {settings.OPENROUTER_API_KEY}"}
 

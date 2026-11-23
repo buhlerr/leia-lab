@@ -62,10 +62,8 @@ def build_query_graph(pool: asyncpg.Pool, settings: Settings | None = None):
         return {"prompt": prompt}
 
     async def generate_answer(state: QueryState) -> dict[str, Any]:
-        answer, _ = await chat_completion(
-            "", state["prompt"], settings, temperature=0.1, max_tokens=1500
-        )
-        return {"answer": answer}
+        r = await chat_completion("", state["prompt"], settings, temperature=0.1)
+        return {"answer": r.text}
 
     builder = StateGraph(QueryState)
     builder.add_node("embed_query", embed_query)
