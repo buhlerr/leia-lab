@@ -170,6 +170,19 @@ def test_no_broken_cited_path_in_docs():
     )
 
 
+# --- Autotestes em mini-repo: a checagem falha no bug real ---
+
+def _commit(cwd: Path, msg: str) -> None:
+    _git("-c", "user.email=t@e.st", "-c", "user.name=t", "commit", "-qm", msg, cwd=cwd)
+
+
+def _commit_all(cwd: Path) -> None:
+    """Mini-repo com tudo que esta no disco ja versionado no primeiro commit."""
+    _git("init", "-q", cwd=cwd)
+    _git("add", ".", cwd=cwd)
+    _commit(cwd, "init")
+
+
 def test_broken_cited_paths_flag_a_renamed_file(tmp_path: Path):
     """Renomear um arquivo citado: o detector denuncia o caminho velho no doc."""
     (tmp_path / "README.md").write_text(
@@ -183,9 +196,126 @@ def test_broken_cited_paths_flag_a_renamed_file(tmp_path: Path):
     model = tmp_path / "model"
     model.mkdir()
     (model / "Lifecycle.tla").write_text("x = 1\n", encoding="utf-8")
-    _git("init", "-q", cwd=tmp_path)
-    _git("add", ".", cwd=tmp_path)
-    _git("-c", "user.email=t@e.st", "-c", "user.name=t", "commit", "-qm", "init", cwd=tmp_path)
+    _commit_all(tmp_path)
     assert broken_cited_paths(cwd=tmp_path) == []
     _git("mv", "src/gone.py", "src/other.py", cwd=tmp_path)
     assert broken_cited_paths(cwd=tmp_path) == [("README.md", "src/gone.py")]
+
+
+def test_top_level_rename_or_delete_breaks_citations(tmp_path: Path):
+    """Renomear/apagar entrada de nivel superior (git mv scripts tools, git mv
+    deploy infra, git rm pyproject.toml, git mv .env.op .env.1p, git mv gold
+    goldset) esconde todas as citacoes do nome velho quando so a arvore ATUAL
+    define as raizes. As arvores pai do HEAD continuam com o nome, e sao elas
+    que provam que o token era caminho."""
+    (tmp_path / "README.md").write_text(
+        "Rode `scripts/ci.sh`. Firewall em `deploy/`, build no `pyproject.toml`, "
+        "segredos no `.env.op`, gabarito em `gold/gabarito.jsonl`.\n",
+        encoding="utf-8",
+    )
+    for rel in ("scripts/ci.sh", "deploy/firewall.sh", "pyproject.toml", ".env.op", "gold/gabarito.jsonl"):
+        f = tmp_path / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("x = 1\n", encoding="utf-8")
+    _commit_all(tmp_path)
+    assert broken_cited_paths(cwd=tmp_path) == []
+    _git("mv", "scripts", "tools", cwd=tmp_path)
+    _git("mv", "deploy", "infra", cwd=tmp_path)
+    _git("rm", "-q", "pyproject.toml", cwd=tmp_path)
+    _git("mv", ".env.op", ".env.1p", cwd=tmp_path)
+    _git("mv", "gold", "goldset", cwd=tmp_path)
+    _commit(tmp_path, "mv")
+    assert broken_cited_paths(cwd=tmp_path) == [
+        ("README.md", "scripts/ci.sh"),
+        ("README.md", "deploy/"),
+        ("README.md", "pyproject.toml"),
+        ("README.md", ".env.op"),
+        ("README.md", "gold/gabarito.jsonl"),
+    ]
+
+
+def test_citation_case_must_match_the_tracked_path(tmp_path: Path):
+    """Em NTFS/macOS o disco resolve `docs/operacao.md` para o arquivo de outra
+    caixa e a citacao quebrada passa. O arquivo solto no disco simula o que um
+    filesystem case-insensitive faz de graca; a verdade e a caixa do caminho
+    versionado no indice, nao a do disco."""
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "OPERACAO.md").write_text("x\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text(
+        "Certo: `docs/OPERACAO.md`. Errado: `docs/operacao.md`.\n",
+        encoding="utf-8",
+    )
+    _commit_all(tmp_path)
+    (tmp_path / "docs" / "operacao.md").write_text("x\n", encoding="utf-8")
+    assert broken_cited_paths(cwd=tmp_path) == [("README.md", "docs/operacao.md")]
+
+
+def test_citation_with_accents_matches_tracked_name(tmp_path: Path):
+    """Com core.quotepath no default, `git ls-files` devolveria o nome com
+    escapes ("rel\\303\\241rio.md") e nenhum caminho com acento seria achado.
+    A conferencia le o caminho bruto do indice (ls-files -z)."""
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "relatório-2026.md").write_text("x\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("Doc: `docs/relatório-2026.md`.\n", encoding="utf-8")
+    _commit_all(tmp_path)
+    assert broken_cited_paths(cwd=tmp_path) == []
+
+
+def test_absolute_link_is_read_against_the_repo_root(tmp_path: Path):
+    """Link absoluto de producao (`/root/leia/api.env`) fazia Path.exists
+    levantar PermissionError: crash no lugar de falha. Absoluto so e afirmacao
+    sobre esta arvore quando nasce numa raiz do repo (leitura de raiz do
+    GitHub); fora disso e caminho de outra maquina e fica fora."""
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "OPERACAO.md").write_text("x\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text(
+        "Producao: [api](/root/leia/api.env). Interno: [op](/docs/OPERACAO.md).\n",
+        encoding="utf-8",
+    )
+    _commit_all(tmp_path)
+    assert broken_cited_paths(cwd=tmp_path) == []
+    (tmp_path / "README.md").write_text("Quebrado: [gone](/docs/nao-existe.md).\n", encoding="utf-8")
+    assert broken_cited_paths(cwd=tmp_path) == [("README.md", "/docs/nao-existe.md")]
+
+
+def test_nested_doc_relative_citation(tmp_path: Path):
+    """Doc aninhado cita caminho relativo a si (`matriz/v3.jsonl` em
+    data/README.md): o primeiro segmento nao e raiz e a citacao nem entrava na
+    checagem. Resolve contra o diretorio do doc, e o nome que existia na arvore
+    pai prova que era caminho quando quebra."""
+    matriz = tmp_path / "data" / "matriz"
+    matriz.mkdir(parents=True)
+    (matriz / "v3.jsonl").write_text("{}\n", encoding="utf-8")
+    (tmp_path / "data" / "README.md").write_text("Matriz ativa: `matriz/v3.jsonl`.\n", encoding="utf-8")
+    _commit_all(tmp_path)
+    assert broken_cited_paths(cwd=tmp_path) == []
+    _git("mv", "data/matriz", "data/matrix", cwd=tmp_path)
+    _commit(tmp_path, "mv")
+    assert broken_cited_paths(cwd=tmp_path) == [("data/README.md", "matriz/v3.jsonl")]
+
+
+def test_renamed_or_miscased_link_target_is_flagged(tmp_path: Path):
+    """Alem do token em crase, o ALVO de link renomeado ou com caixa trocada
+    tem de ser denunciado (a caixa vale igual para link)."""
+    model = tmp_path / "model"
+    model.mkdir()
+    (model / "Lifecycle.tla").write_text("x = 1\n", encoding="utf-8")
+    (tmp_path / "README.md").write_text("Modelo: [spec](model/Lifecycle.tla).\n", encoding="utf-8")
+    _commit_all(tmp_path)
+    assert broken_cited_paths(cwd=tmp_path) == []
+    _git("mv", "model/Lifecycle.tla", "model/Outra.tla", cwd=tmp_path)
+    assert broken_cited_paths(cwd=tmp_path) == [("README.md", "model/Lifecycle.tla")]
+    (tmp_path / "README.md").write_text("Modelo: [spec](model/outra.tla).\n", encoding="utf-8")
+    assert broken_cited_paths(cwd=tmp_path) == [("README.md", "model/outra.tla")]
+
+
+def test_allowlisted_roots_do_not_need_to_exist(tmp_path: Path):
+    """A allowlist e o contrato do que e citado de proposito sem existir num
+    checkout novo; a checagem nao pode passar a exigir esses caminhos."""
+    (tmp_path / "README.md").write_text(
+        "Minutas: `leia-minutas-teste-mascaradas/locacao-01.txt`; estado: "
+        "`.local/linear-sync-state.json`; plano: `.planning/reviews/pr53.md`.\n",
+        encoding="utf-8",
+    )
+    _commit_all(tmp_path)
+    assert broken_cited_paths(cwd=tmp_path) == []
