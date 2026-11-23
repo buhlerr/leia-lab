@@ -29,6 +29,9 @@ leia-kb-legislacao/
 .shelve/
 # end shelve-managed-block
 
+# Referencias op:// do 1Password, sem valores (ADR-0003)
+!.env.op
+
 # Dependencias geradas
 node_modules/
 

@@ -31,6 +31,6 @@ Preconditions:
 
 ## Gotchas
 
-- Offline numbers prove the scoring mechanism only (Jev stub picks the first theme). The real baseline (F1 0.717 on matrix v3) needs paid keys via Shelve; do not compare offline F1 with it.
+- Offline numbers prove the scoring mechanism only (Jev stub picks the first theme). The real baseline (F1 0.717 on matrix v3) needs paid keys via 1Password (`.env.op`); do not compare offline F1 with it.
 - `.local/gold-runs/` also holds the user's real runs (`real-v1`, `gold-goldv3-matrizv3`, ...). Never reuse those labels; prefix with the run id so cleanup moves yours out.
 - `gold-compare` reads analyses from the current run's database. Labels from another database (or from the user's real runs) point to ids that do not exist here.

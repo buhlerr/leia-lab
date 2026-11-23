@@ -76,7 +76,7 @@ curl -s -c $J -b $J -o /dev/null -w "%{http_code}\n" -e "http://127.0.0.1:8011/a
 curl -s -b $J http://127.0.0.1:8011/admin/domain/riskmatrix/ | grep -o 'href="/admin/domain/riskmatrix/[0-9]*/change/"'
 ```
 
-Paid paths (real OpenRouter / TypeSafe keys, `--trace` to LangSmith/MLflow, `trace-usage`) are out of scope for this skill. They need `shelve run --env production -- ...` and spend money or plan quota; ask the user first.
+Paid paths (real OpenRouter / TypeSafe keys, `--trace` to LangSmith/MLflow, `trace-usage`) are out of scope for this skill. They need `op run --env-file=.env.op -- ...` and spend money or plan quota; ask the user first.
 
 ## Evidence
 
