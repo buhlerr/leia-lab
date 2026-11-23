@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import io
 import zipfile
+from pathlib import Path
 
 import docx
 import pypdf
 import pytest
 
+from src.graphs.ingest_graph import _read_path
 from src.ingest.extract import (
+    MAX_TEXT_CHARS,
     DocumentError,
     DocumentTooLargeError,
     EmptyDocumentError,
@@ -151,3 +154,27 @@ def test_two_document_errors_cannot_share_a_code():
             http_status = 422
             code = "invalid_document"
             public_message = "Outra mensagem."
+
+
+def test_extract_docx_rejects_text_above_max_text_chars(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("src.ingest.extract.MAX_TEXT_CHARS", 5)
+
+    with pytest.raises(DocumentTooLargeError):
+        extract_text("minuta.docx", _docx_with_table())
+
+
+def test_read_path_rejects_txt_above_max_text_chars(tmp_path: Path):
+    path = tmp_path / "grande.txt"
+    path.write_text("a" * (MAX_TEXT_CHARS + 1), encoding="utf-8")
+
+    with pytest.raises(DocumentTooLargeError):
+        _read_path(path)
+
+
+def test_read_path_rejects_txt_above_max_upload_bytes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    path = tmp_path / "grande.txt"
+    path.write_bytes(b"x" * 11)
+    monkeypatch.setattr("src.ingest.extract.MAX_UPLOAD_BYTES", 10)
+
+    with pytest.raises(DocumentTooLargeError):
+        _read_path(path)
