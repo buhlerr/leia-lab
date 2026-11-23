@@ -96,3 +96,20 @@ def test_split_refuses_unmasked_text_and_keeps_chunks_masked():
         split_contract_text("Paragrafo 1\nParagrafo 2")
     chunks = split_contract_text(mask_personal_data("Paragrafo 1\nParagrafo 2"), chunk_size=12, chunk_overlap=0)
     assert chunks == ["Paragrafo 1", "Paragrafo 2"] and all(isinstance(c, MaskedText) for c in chunks)
+
+
+@pytest.mark.parametrize(
+    "rotulo",
+    [
+        "LOCADOR", "Locadora", "LOCATÁRIO", "Locataria", "FIADORA", "Cônjuge", "Testemunha 2", "Nome completo",
+        "CONTRATANTE", "Contratante", "CONTRATADA", "CONTRATADO", "CONTRATANTES", "LOCADOR(A)", "OUTORGANTE",
+        "OUTORGADA", "INTERVENIENTE", "ANUENTE", "PROCURADOR",
+    ],
+)
+def test_name_after_any_party_label_is_masked_everywhere(rotulo):
+    raw = f"{rotulo}: Helena Ribeiro Prates, residente nesta cidade. Assina Helena Ribeiro Prates."
+    masked = mask_personal_data(raw)
+    assert "Helena" not in masked and "Prates" not in masked
+    assert masked.count("[NOME]") == 2
+    assert masked.startswith(f"{rotulo}:")
+
