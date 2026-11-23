@@ -16,6 +16,14 @@ from src.db.connection import init_db
 
 API_ROLE = "leia_api"
 READONLY_ROLE = "leia_readonly"
+APP_ROLE = "leia_app"
+
+# Guardioes do schema: so o dono os instala em gatilhos; EXECUTE publico abriria a forja de
+# auditoria via TEMP TABLE + gatilho proprio (domain_history_log e SECURITY DEFINER).
+GUARD_FUNCTIONS = ("domain_history_log()", "forbid_change()", "analyses_guard()")
+# As colunas que finish_analysis/fail_analysis tocam (src/db/analyses.py); fora delas, sem grant.
+FINISH_COLUMNS = ("status", "minuta_type", "report", "finished_at")
+IMMUTABLE_COLUMNS = ("filename_alias", "text_sha256", "rules_snapshot", "idempotency_key")
 
 DOMAIN_READ_TABLES = [
     "minuta_types",
@@ -180,3 +188,103 @@ async def test_leia_readonly_cannot_write_anything(dpool, sql):
                 await conn.execute(sql)
         finally:
             await conn.execute("RESET ROLE")
+
+
+# ---------------------------------------------------------------- funcoes guardias (revisao PR 55)
+
+
+async def test_guard_functions_stay_with_the_owner_and_the_matrix_trigger_still_logs(dpool):
+    """MED 1: nem PUBLIC nem os papeis minimos executam os guardioes; o caminho legitimo segue."""
+    for fn in GUARD_FUNCTIONS:
+        for role in ("public", API_ROLE, READONLY_ROLE):
+            assert not await dpool.fetchval(
+                "SELECT has_function_privilege($1, $2, 'EXECUTE')", role, fn
+            ), f"{fn} executavel por {role}"
+    await _seed_row(dpool)
+    before = await dpool.fetchval("SELECT count(*) FROM domain_history")
+    async with dpool.acquire() as conn:
+        await conn.execute(f"SET ROLE {APP_ROLE}")
+        try:
+            await conn.execute("UPDATE risk_matrix SET active = NOT active")
+        finally:
+            await conn.execute("RESET ROLE")
+    assert await dpool.fetchval("SELECT count(*) FROM domain_history") == before + 1
+
+
+@pytest.mark.parametrize("role", [API_ROLE, READONLY_ROLE])
+async def test_minimal_roles_cannot_forge_domain_history_with_a_temp_table(dpool, role):
+    """MED 1: TEMP TABLE + gatilho chamando domain_history_log() e negado na criacao do gatilho."""
+    async with dpool.acquire() as conn:
+        await conn.execute(f"SET ROLE {role}")
+        try:
+            await conn.execute("CREATE TEMP TABLE fake_matrix (id bigint)")
+            with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                await conn.execute(
+                    "CREATE TRIGGER fake AFTER INSERT ON fake_matrix FOR EACH ROW "
+                    "EXECUTE FUNCTION domain_history_log()"
+                )
+        finally:
+            await conn.execute("RESET ROLE")
+            await conn.execute("DROP TABLE IF EXISTS pg_temp.fake_matrix")
+
+
+async def test_init_db_converges_by_revoking_excess_grants(dpool):
+    """MED 2: init converge, nao acumula: grant excedente de versao anterior nao sobrevive."""
+    await dpool.execute(f"GRANT DELETE ON risk_matrix TO {API_ROLE}")
+    await dpool.execute(f"GRANT USAGE ON SEQUENCE minuta_types_id_seq TO {READONLY_ROLE}")
+    await init_db(dpool)
+    assert not await dpool.fetchval("SELECT has_table_privilege($1, 'risk_matrix', 'DELETE')", API_ROLE)
+    assert not await dpool.fetchval(
+        "SELECT has_sequence_privilege($1, 'minuta_types_id_seq', 'USAGE')", READONLY_ROLE
+    )
+    assert await dpool.fetchval("SELECT has_table_privilege($1, 'analyses', 'INSERT')", API_ROLE)
+
+
+async def test_leia_api_updates_only_the_columns_of_the_finish(dpool):
+    """LOW 1: UPDATE de analyses e por coluna; fora do termino, negado pelo grant, antes do gatilho."""
+    await _seed_row(dpool)
+    analysis_id = await dpool.fetchval("SELECT id FROM analyses LIMIT 1")
+    for col in FINISH_COLUMNS:
+        assert await dpool.fetchval(
+            "SELECT has_column_privilege($1, 'analyses', $2, 'UPDATE')", API_ROLE, col
+        ), col
+    for col in IMMUTABLE_COLUMNS:
+        assert not await dpool.fetchval(
+            "SELECT has_column_privilege($1, 'analyses', $2, 'UPDATE')", API_ROLE, col
+        ), col
+    async with dpool.acquire() as conn:
+        await conn.execute(f"SET ROLE {API_ROLE}")
+        try:
+            # A mensagem distingue a negacao do grant ("permission denied") da do gatilho.
+            with pytest.raises(asyncpg.InsufficientPrivilegeError, match="permission denied"):
+                await conn.execute(
+                    "UPDATE analyses SET idempotency_key = 'outra' WHERE id = $1", analysis_id
+                )
+        finally:
+            await conn.execute("RESET ROLE")
+
+
+@pytest.mark.parametrize("role", [API_ROLE, READONLY_ROLE])
+async def test_minimal_roles_cannot_create_or_drop_tables_in_public(dpool, role):
+    """LOW 4: o papel nao cria nem derruba tabela no espaco da Leia."""
+    async with dpool.acquire() as conn:
+        await conn.execute(f"SET ROLE {role}")
+        try:
+            with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                await conn.execute("CREATE TABLE fora_do_papel (id INT)")
+            with pytest.raises(asyncpg.InsufficientPrivilegeError):
+                await conn.execute("DROP TABLE analyses")
+        finally:
+            await conn.execute("RESET ROLE")
+
+
+async def test_reinit_keeps_third_party_tables_and_stays_idempotent(pool):
+    """LOW 4: init duas vezes com os papeis minimos; tabelas de terceiros (directus_*) intocadas."""
+    await pool.execute("CREATE TABLE directus_users (id INT PRIMARY KEY, email TEXT)")
+    await pool.execute("INSERT INTO directus_users VALUES (1, 'alguem@exemplo.invalid')")
+    await init_db(pool)
+    await init_db(pool)
+    assert await pool.fetchval("SELECT email FROM directus_users WHERE id = 1") == "alguem@exemplo.invalid"
+    for role in (API_ROLE, READONLY_ROLE):
+        assert not await pool.fetchval("SELECT has_table_privilege($1, 'directus_users', 'SELECT')", role)
+    assert await pool.fetchval("SELECT has_table_privilege($1, 'analyses', 'INSERT')", API_ROLE)
