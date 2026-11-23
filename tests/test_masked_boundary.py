@@ -53,7 +53,7 @@ async def test_boundary_refuses_plain_str_before_any_trace(where, capture):
 
 
 async def test_boundary_accepts_the_same_text_once_masked():
-    text, _ = await chat_completion("sys", mask_personal_data(RAW), OFFLINE)
+    text = (await chat_completion("sys", mask_personal_data(RAW), OFFLINE)).text
     res = await call_jev(mask_payload({"clausula": RAW}), QUESTIONS, OFFLINE)
     emb = await embed_text(mask_personal_data(RAW), OFFLINE)
     assert text and "q" in res["answers"] and emb.vector
