@@ -103,7 +103,8 @@ def test_split_refuses_unmasked_text_and_keeps_chunks_masked():
     [
         "LOCADOR", "Locadora", "LOCATÁRIO", "Locataria", "FIADORA", "Cônjuge", "Testemunha 2", "Nome completo",
         "CONTRATANTE", "Contratante", "CONTRATADA", "CONTRATADO", "CONTRATANTES", "LOCADOR(A)", "OUTORGANTE",
-        "OUTORGADA", "INTERVENIENTE", "ANUENTE", "PROCURADOR",
+        "OUTORGADA", "INTERVENIENTE", "ANUENTE", "PROCURADOR", "CONTRATANTE(S)", "LOCADOR(A)S", "LOCADOR(A)(S)",
+        "LOCADOR/A", "LOCADOR (A)", "RESPONSÁVEIS", "REPRESENTANTES LEGAIS",
     ],
 )
 def test_name_after_any_party_label_is_masked_everywhere(rotulo):
@@ -114,8 +115,9 @@ def test_name_after_any_party_label_is_masked_everywhere(rotulo):
     assert masked.startswith(f"{rotulo}:")
 
 
-
-@pytest.mark.parametrize("rotulo", ["o LOCADOR", "a Locadora", "a CONTRATANTE", "os LOCADORES"])
+@pytest.mark.parametrize(
+    "rotulo", ["o LOCADOR", "a Locadora", "a CONTRATANTE", "os LOCADORES", "Os LOCADORES", "A LOCADORA"]
+)
 def test_party_label_before_a_qualified_name_does_not_shield_it(rotulo):
     masked = mask_personal_data(f"{rotulo} Helena Ribeiro Prates, brasileira, casada. Assina Helena Ribeiro Prates.")
     assert masked == f"{rotulo} [NOME], brasileira, casada. Assina [NOME]."
@@ -124,3 +126,35 @@ def test_party_label_before_a_qualified_name_does_not_shield_it(rotulo):
 def test_party_labels_alone_are_not_names():
     raw = "LOCADOR E LOCATÁRIO, brasileiros, ajustam; CONTRATANTE: LOCADORA E LOCATÁRIA Assinam."
     assert mask_personal_data(raw) == raw
+
+
+@pytest.mark.parametrize("rotulo", ["FIADOR DE", "CÔNJUGE DE", "PROCURADOR DE", "REPRESENTANTE LEGAL DE"])
+def test_preposition_after_a_party_label_is_not_part_of_the_name(rotulo):
+    masked = mask_personal_data(f"{rotulo} Helena Ribeiro Prates, brasileira, casada. Assina Helena Ribeiro Prates.")
+    assert masked == f"{rotulo} [NOME], brasileira, casada. Assina [NOME]."
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "LOCADOR DO IMÓVEL, brasileiro, entrega a posse do imóvel e a vistoria do imóvel.",
+        "LOCADOR DO IMÓVEL, inscrito no CPF, entrega a posse do imóvel e a vistoria do imóvel.",
+        "CONTRATANTE: REPRESENTANTE DA EMPRESA. Os dados da empresa seguem abaixo.",
+        "CLÁUSULA 5: O LOCADOR DEVE INFORMAR CPF. O locatário deve informar o banco.",
+    ],
+)
+def test_legal_phrases_after_a_party_label_are_not_names(raw):
+    assert mask_personal_data(raw) == raw
+
+
+@pytest.mark.parametrize(
+    ("raw", "esperado"),
+    [
+        ("a LOCADORA Helena, brasileira, casada.", "a LOCADORA [NOME], brasileira, casada."),
+        ("o PROCURADOR Mendes, CPF 123.456.789-00.", "o PROCURADOR [NOME], CPF [CPF]."),
+        ("Sra. Locadora Helena recebeu as chaves.", "Sra. Locadora [NOME] recebeu as chaves."),
+        ("LOCADOR: Cônjuge Maria.", "LOCADOR: Cônjuge [NOME]."),
+    ],
+)
+def test_single_name_after_a_party_label_is_masked_where_it_was_found(raw, esperado):
+    assert mask_personal_data(raw) == esperado
