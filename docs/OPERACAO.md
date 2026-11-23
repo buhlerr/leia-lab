@@ -74,6 +74,23 @@ op run --env-file=.env.op -- uv run python -m src.cli gold-run --label real-v1 -
 - Os `.env` de produção no CT 116 (`/root/leia/*.env`) continuam como estão; não leem do 1Password.
 - `LEIA_HOMELAB_PG_PASSWORD` / `LEIA_HOMELAB_DIRECTUS_PASSWORD` seguem como variáveis de usuário do Windows.
 
+## Espelho das tarefas no Linear
+
+O Beads é a fonte da verdade; o Linear (time `VIT`, workspace `rauvbr`) é uma vitrine com as tarefas
+abertas. A configuração (`linear.team_id`, `linear.state_map.*`, `linear.outbound_state_map.*`) fica no
+banco do Beads e viaja com `bd dolt push` / `bd dolt pull`.
+
+```bash
+op run --env-file=.env.op -- bd linear sync --push --state open --dry-run   # ver antes
+op run --env-file=.env.op -- bd linear sync --push --state open             # enviar
+```
+
+- Estados: `open` → Todo, `in_progress` → In Progress, `closed` → Done.
+- Rótulos de triagem existem no Linear (`needs-triage`, `needs-info`, `ready-for-agent`,
+  `ready-for-human`, `wontfix`). Tipos (`task`, `feature`) não viram rótulo; épicos viram issue-pai.
+- Comentários, anexos e dependências não sincronizam.
+- A volta (Linear → Beads, `bd linear sync` sem `--push`) fica desligada até o dono pedir.
+
 ## Backup e restore do Postgres
 
 | O quê | Onde |

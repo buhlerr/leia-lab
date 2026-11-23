@@ -54,6 +54,7 @@ This repository opts in to the **Team-maintainer** profile of the Beads block be
 - Never merge into `master`, push to `master`, or force-push a branch someone else pushed to. The owner reviews and merges every PR.
 - Ask first for anything irreversible or paid: deploys to CT 116, writes to production Postgres, real OpenRouter/TypeSafe keys, `--trace`.
 - A "do not commit" or "do not push" in the current request still wins.
+- At session close, after `bd dolt push`, mirror open beads to Linear (team `VIT`): `op run --env-file=.env.op -- bd linear sync --push --state open`. Beads is the source of truth; closed beads stay out of Linear. Run a two-way `bd linear sync` only once the owner turns it on.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:46cd31e7 -->
 ## Beads Issue Tracker
