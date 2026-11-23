@@ -40,6 +40,40 @@ from src.tracing import configure_mlflow, mlflow_request, shutdown_mlflow, use_s
 _log = logging.getLogger(__name__)
 
 _401_BODY = {"code": "unauthorized", "message": "Token de servico ausente ou invalido."}
+_DISCONNECT_POLL = 0.5  # s entre sondas de desconexao
+
+
+class ClientDisconnected(Exception):
+    """O cliente foi embora antes da analise terminar."""
+
+
+async def _watch_disconnect(request: Request) -> bool:
+    """True quando o canal do pedido reporta ``http.disconnect``; sonda ate la."""
+    while not await request.is_disconnected():
+        await asyncio.sleep(_DISCONNECT_POLL)
+    return True
+
+
+async def run_disconnect_guarded(work: Any, request: Request) -> Any:
+    """Roda ``work`` e devolve o resultado; desconexao do cliente cancela o trabalho.
+
+    O cancelamento atravessa ``analyze()``: a linha de ``analyses`` termina 'failed' pelo
+    dono do ciclo de vida, em vez de seguir gastando chamadas pagas para um cliente que ja foi.
+    """
+    task = asyncio.ensure_future(work)
+    watcher = asyncio.ensure_future(_watch_disconnect(request))
+    try:
+        await asyncio.wait({task, watcher}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        watcher.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await watcher
+    if task.done():
+        return task.result()  # levanta a excecao se work falhou
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+    raise ClientDisconnected()
 
 
 def _require_token_factory(expected: str) -> Any:
@@ -116,14 +150,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     async def create_analysis(
         file: Annotated[UploadFile, File(description="Contrato (.pdf, .docx ou .txt)")],
+        request: Request,
     ) -> AnalysisResult:
         # Le no maximo um byte alem do teto: o nucleo recusa sem carregar o resto.
         data = await file.read(MAX_UPLOAD_BYTES + 1)
         # Traco MLflow so quando ele subiu junto; o nucleo (service.py) segue sem rastreio.
         with mlflow_request() if app.state.mlflow_on else contextlib.nullcontext():
-            return await evaluate_upload(
-                app.state.pool, app.state.graph, filename=file.filename or "", data=data
-            )
+            try:
+                return await run_disconnect_guarded(
+                    evaluate_upload(app.state.pool, app.state.graph, filename=file.filename or "", data=data),
+                    request,
+                )
+            except ClientDisconnected:
+                raise HTTPException(
+                    status_code=499,
+                    detail={"code": "client_disconnected", "message": "Cliente desconectou durante a analise."},
+                ) from None
 
     @app.get(
         "/v1/analyses/{analysis_id}",

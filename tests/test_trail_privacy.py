@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from contextlib import aclosing
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
@@ -274,3 +275,14 @@ async def test_a_failure_write_that_never_returns_releases_the_request(seeded, s
         await asyncio.wait_for(run, timeout=2)
     assert handler_started.is_set()
     assert "a escrita de falha nao terminou" in caplog.text
+
+
+async def test_a_stream_consumer_that_stops_early_closes_the_row(seeded, settings, monkeypatch):
+    """Quem consome analyze_stream para antes do fim e fecha o iterador: a linha termina 'failed'."""
+    graph = build_analyze_minuta_graph(seeded, settings)
+    async with aclosing(analyze_stream(graph, raw_text=RAW, filename=FILE_NAME)) as stream:
+        async for _update in stream:
+            break  # consumidor satisfeito com o primeiro update: a analise NAO terminou
+    row, steps = await _only_analysis(seeded)
+    assert (row["status"], row["report"], steps) == ("failed", {"error": "GeneratorExit"}, ["iniciar"])
+    assert row["finished_at"] is not None

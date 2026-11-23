@@ -6,6 +6,7 @@ offline de Jev/LLM/embeddings), sem tocar o banco de desenvolvimento.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import uuid
 from contextlib import asynccontextmanager
@@ -15,7 +16,7 @@ import docx
 import httpx
 import pytest
 
-from src.api.app import create_app
+from src.api.app import ClientDisconnected, create_app, run_disconnect_guarded
 from src.config import Settings
 from src.db.connection import init_db
 from src.graphs.ingest_graph import build_ingest_graph
@@ -313,3 +314,49 @@ async def test_api_sobe_e_analisa_com_o_mlflow_fora_do_ar(pool, api_settings) ->
             headers=_auth(),
         )
         assert r.status_code == 201, r.text
+
+
+# ---------------------------------------------------------------- desconexao do cliente
+
+
+class _FakeRequest:
+    """Request de mentira: desconecta (True) na n-esima sonda."""
+
+    def __init__(self, on_probe: int = 1) -> None:
+        self._on_probe = on_probe
+        self.probes = 0
+
+    async def is_disconnected(self) -> bool:
+        self.probes += 1
+        return self.probes >= self._on_probe
+
+
+async def test_desconexao_cancela_o_trabalho_em_andamento() -> None:
+    """Cliente que vai embora: a analise e cancelada (a linha vira 'failed' pelo dono do ciclo)."""
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def hang() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    with pytest.raises(ClientDisconnected):
+        await run_disconnect_guarded(hang(), _FakeRequest(on_probe=1))
+    assert started.is_set() and cancelled.is_set()
+
+
+async def test_cliente_presente_deixa_o_trabalho_terminar() -> None:
+    """Sem desconexao, o guardiao nao interfere: o resultado do trabalho volta inteiro."""
+
+    async def work() -> str:
+        return "resultado"
+
+    class Never(_FakeRequest):
+        async def is_disconnected(self) -> bool:
+            return False
+
+    assert await run_disconnect_guarded(work(), Never()) == "resultado"

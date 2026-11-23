@@ -233,6 +233,13 @@ async def analyze(graph: AnalyzeMinutaGraph, *, config: dict[str, Any] | None = 
 async def analyze_stream(
     graph: AnalyzeMinutaGraph, *, config: dict[str, Any] | None = None, stream_mode: str = "updates", **kwargs: Any
 ) -> AsyncIterator[Any]:
+    """Stream dos updates do grafo; a linha e do mesmo ``_owned_analysis`` de ``analyze()``.
+
+    Contrato de quem consome: parar antes do fim exige fechar o iterador (``contextlib.aclosing``)
+    AINDA COM O POLO VIVO -- o ``GeneratorExit`` da execucao do consumidor termina a linha como
+    'failed'. Iterador abandonado sem fechamento so termina no shutdown_asyncgens do loop, e a
+    escrita falha se o pool ja fechou antes dele.
+    """
     inp = await prepare_input(**kwargs)
     async with _owned_analysis(graph.pool, inp):
         async for chunk in graph.compiled.astream(inp, _run_config(config, inp), stream_mode=stream_mode):
