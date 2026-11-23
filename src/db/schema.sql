@@ -177,8 +177,13 @@ CREATE TABLE IF NOT EXISTS analyses (
     minuta_type TEXT,
     report JSONB,
     started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    finished_at TIMESTAMPTZ
+    finished_at TIMESTAMPTZ,
+    idempotency_key TEXT                        -- header Idempotency-Key do POST da API; NULL na CLI
 );
+-- Uma analise por chave: o INSERT do retry vira ON CONFLICT DO NOTHING. Banco anterior a coluna a
+-- ganha vazia (linhas antigas sem chave).
+ALTER TABLE analyses ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS analyses_idempotency_key ON analyses (idempotency_key);
 -- Ciclo de vida: running -> done | unsupported | failed. Status fora do ciclo em banco legado e
 -- normalizado para 'failed' (valor original no report) ANTES do CHECK; o CHECK em si so e criado
 -- se ainda nao existe -- sem o DROP+ADD de antes, que revalidava e trancava a tabela a cada init.
@@ -211,10 +216,10 @@ BEGIN
             USING ERRCODE = 'insufficient_privilege';
     END IF;
     IF (OLD.id, OLD.filename_alias, OLD.text_sha256, OLD.params, OLD.rules_snapshot, OLD.rules_hash,
-        OLD.matrix_version, OLD.prompt_version, OLD.domain_history_id, OLD.started_at)
+        OLD.matrix_version, OLD.prompt_version, OLD.domain_history_id, OLD.started_at, OLD.idempotency_key)
        IS DISTINCT FROM
        (NEW.id, NEW.filename_alias, NEW.text_sha256, NEW.params, NEW.rules_snapshot, NEW.rules_hash,
-        NEW.matrix_version, NEW.prompt_version, NEW.domain_history_id, NEW.started_at) THEN
+        NEW.matrix_version, NEW.prompt_version, NEW.domain_history_id, NEW.started_at, NEW.idempotency_key) THEN
         RAISE EXCEPTION 'analyses snapshot columns are immutable' USING ERRCODE = 'insufficient_privilege';
     END IF;
     RETURN NEW;

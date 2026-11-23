@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import tempfile
+import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -168,6 +169,8 @@ class NovaAnaliseForm(forms.Form):
 def post_analysis(filename: str, data: bytes) -> tuple[int, dict]:
     """Envia a minuta à API (multipart, campo ``file``) e devolve ``(status, corpo JSON)``.
 
+    Cada envio do formulário é uma análise nova: uma ``Idempotency-Key`` nova por chamada.
+
     Sem ``LEIA_API_TOKEN`` não faz nenhuma requisição: devolve ``(0, {})``. Falha de rede levanta
     ``httpx.HTTPError``. O nome do arquivo vai só no multipart: nunca em log, nunca na resposta.
     """
@@ -177,7 +180,7 @@ def post_analysis(filename: str, data: bytes) -> tuple[int, dict]:
         response = client.post(
             f"{settings.LEIA_API_URL}/v1/analyses",
             files={"file": (filename, data)},
-            headers={"Authorization": f"Bearer {settings.LEIA_API_TOKEN}"},
+            headers={"Authorization": f"Bearer {settings.LEIA_API_TOKEN}", "Idempotency-Key": str(uuid.uuid4())},
         )
         try:
             body = response.json()

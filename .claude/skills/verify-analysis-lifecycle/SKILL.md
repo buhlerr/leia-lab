@@ -1,6 +1,6 @@
 ---
 name: verify-analysis-lifecycle
-description: Model-check (TLA+/TLC) the lifecycle of an `analyses` row in leia-lab: analyze() owns the row from INSERT to a final status, so no run ends with the row stuck in 'running', a finished status never changes, and a finished row's trail starts with `iniciar`. Use when a change touches analyze()/analyze_stream(), the iniciar or validar nodes, src/db/analyses.py, or the analyses table/trigger in src/db/schema.sql, or when you add an await, a node, or an error handler on that path.
+description: Model-check (TLA+/TLC) the lifecycle of an `analyses` row in leia-lab: analyze() owns the row from INSERT to a final status, so no run ends with the row stuck in 'running', a finished status never changes, a finished row's trail starts with `iniciar`, and one idempotency key names at most one row. Use when a change touches analyze()/analyze_stream(), the iniciar or validar nodes, src/db/analyses.py, or the analyses table/trigger in src/db/schema.sql, or when you add an await, a node, or an error handler on that path.
 ---
 
 # Verify the analysis lifecycle
@@ -11,6 +11,7 @@ description: Model-check (TLA+/TLC) the lifecycle of an `analyses` row in leia-l
 - **TerminalNeverChanges.** `done`, `unsupported` and `failed` never change. Harm: a finished, audited result is rewritten after the fact, e.g. a `done` report overwritten by `failed`.
 - **TrailStartsWithIniciar.** A finished row has the `iniciar` entry first in `analysis_trail`. Harm: a row nobody can reconstruct (no rules hash, no params).
 - **ReturnedMeansFinished.** `analyze()` returns normally only after the row reached `done` or `unsupported`.
+- **OneRowPerKey.** A run whose `Idempotency-Key` another call already holds writes no row and no trail, and raises `AnalysisKeyTaken` before any external call. Harm if broken: a retried POST runs the paid calls again and leaves a second undeletable row and trail (VIT-8).
 
 The model is [model/AnalysisLifecycle.tla](model/AnalysisLifecycle.tla). TLC explores every order of success, exception and cancellation (`asyncio.CancelledError`) at every await point of one `analyze()` call, and for DB writes both "failed before commit" and "committed, then the reply was lost".
 
@@ -33,6 +34,8 @@ bash .claude/skills/verify-analysis-lifecycle/scripts/check.sh current    # repl
 | `fixed_catches_exception_only` | handler catches `Exception`, not `BaseException` | `NoRunEndsRunning` (a cancel slips through) |
 | `fixed_split_iniciar` | INSERT and iniciar trail in two transactions | `TrailStartsWithIniciar` |
 | `fixed_unguarded_failure` | failure UPDATE without `status = 'running'` and trigger without the freeze | `TerminalNeverChanges` |
+| `fixed_no_defer` | a 2nd cancellation during the failure write ends `analyze()` first | `NoRunEndsRunning` |
+| `fixed_no_unique_key` | the code before VIT-8: no unique `idempotency_key`, the INSERT always writes | `OneRowPerKey` |
 
 Read every TLC result with the pstack `/statechart` skill: a violation becomes its shortest path in plain words, and a pass becomes a chart of the states. The `event` variable in each trace state names the code step, e.g. `start_analysis: INSERT: committed, then raised (not caught)`.
 
@@ -48,6 +51,7 @@ Sync commit: `6ff9c6637b4c7674295f5f04796f59e2d62275ca`. At that commit the `fix
 | `Validar`: `validate_and_format`, `append_trail`, `finish_analysis` | `validar` node; `finish_analysis` |
 | `Catches`, `MarkFailed` with `GuardedFailure` | `except BaseException` + `asyncio.shield(fail_analysis(...))`; `fail_analysis` `WHERE status = 'running'` |
 | `TriggerFreezesTerminal`, `Statuses` | `analyses_guard()` and `analyses_status_check` in `src/db/schema.sql` |
+| `other`, `OtherRunInserts`, `KeyConflict`, `UniqueKey` | another POST with the same key; `analyses_idempotency_key` unique index; `INSERT ... ON CONFLICT (idempotency_key) DO NOTHING RETURNING id` and `AnalysisKeyTaken` in `start_analysis` |
 
 Did the covered code change since the sync commit?
 
@@ -68,7 +72,7 @@ If it did, reread the changed parts against the table. Move the sync commit forw
 
 ## Scope and assumptions
 
-- One `analyze()` call and its own row. Runs never share a row (each makes its own uuid), so concurrency across runs is not modeled.
+- One `analyze()` call and its own row. Runs never share a row (each makes its own uuid). The only other run modeled is one holding the same idempotency key (`other`), which may insert at any moment; its own lifecycle is not modeled.
 - The failure UPDATE reaches Postgres. If the database itself is down, no design can mark the row; it stays `running` and the exception from `fail_analysis` is what `analyze()` raises.
 - asyncpg's pool waits for a cancelled statement to settle before releasing the connection (`_wait_for_cancellation` in `asyncpg/pool.py`), so the model treats each SQL statement as committed or not by the time an `except` block runs.
 - The shield keeps the failure write running if a second cancellation arrives (anyio cancels at every await of a cancelled scope). It does not survive the event loop shutting down mid-write.

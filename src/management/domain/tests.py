@@ -420,6 +420,12 @@ class NovaAnaliseTests(SchemaMixin, TestCase):
         # direto da funcao de envio: sem token nao ha requisicao (uma tentativa falharia alto)
         with override_settings(LEIA_API_TOKEN=""):
             self.assertEqual(domain_admin.post_analysis("a.txt", b"x"), (0, {}))
+        # com token, cada envio leva uma Idempotency-Key nova: a API recusa o POST sem ela
+        with override_settings(LEIA_API_TOKEN="t"), mock.patch.object(domain_admin.httpx, "Client") as client:
+            domain_admin.post_analysis("a.txt", b"x")
+            domain_admin.post_analysis("a.txt", b"x")
+        keys = [c.kwargs["headers"]["Idempotency-Key"] for c in client.return_value.__enter__.return_value.post.call_args_list]
+        self.assertEqual(len(set(keys)), 2)
         # sufixo invalido: o formulario barra antes de qualquer chamada
         upload_x = SimpleUploadedFile("planilha.xlsx", b"x")
         with mock.patch.object(domain_admin, "post_analysis") as post_x:

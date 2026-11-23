@@ -2,7 +2,8 @@
 
 Ciclo de vida da linha: ``start_analysis`` (status 'running', com a entrada ``iniciar`` da trilha na
 mesma transacao) -> ``finish_analysis`` ('done' / 'unsupported') ou ``fail_analysis`` ('failed').
-Terminada, a linha nao muda mais (gatilho ``analyses_guard``).
+Terminada, a linha nao muda mais (gatilho ``analyses_guard``). Uma ``idempotency_key`` nomeia no maximo
+uma linha: quem chega depois com a mesma chave nao grava nada e recebe ``AnalysisKeyTaken``.
 """
 
 from __future__ import annotations
@@ -18,6 +19,19 @@ from src.db.rules import RulesSnapshot, canonical_json
 from src.ingest.masking import MaskedText, mask_payload, requires_masked
 
 
+class AnalysisKeyTaken(Exception):
+    """Outra analise ja tem esta ``idempotency_key``; nenhuma linha nova foi gravada.
+
+    ``same_input``: a outra foi pedida para o mesmo texto mascarado e o mesmo apelido de arquivo,
+    isto e, e a mesma analise (o grafo so ve esses dois).
+    """
+
+    def __init__(self, analysis_id: uuid.UUID, *, same_input: bool) -> None:
+        super().__init__(str(analysis_id))
+        self.analysis_id = analysis_id
+        self.same_input = same_input
+
+
 @requires_masked("filename_alias", "masked_text")
 async def start_analysis(
     pool: asyncpg.Pool,
@@ -27,26 +41,40 @@ async def start_analysis(
     filename_alias: MaskedText,
     masked_text: MaskedText,
     params: dict[str, Any],
+    idempotency_key: str | None = None,
 ) -> None:
     """Insere a analise com o snapshot e a entrada ``iniciar`` da trilha, juntas ou nenhuma.
 
-    So o texto MASCARADO e hasheado; str comum e recusada.
+    So o texto MASCARADO e hasheado; str comum e recusada. Chave ja usada: nada e gravado e
+    levanta ``AnalysisKeyTaken`` (dois pedidos simultaneos com a mesma chave gravam uma linha so).
     """
+    text_sha256 = hashlib.sha256(masked_text.encode("utf-8")).hexdigest()
     async with pool.acquire() as conn, conn.transaction():
-        await conn.execute(
+        inserted = await conn.fetchval(
             "INSERT INTO analyses (id, filename_alias, text_sha256, params, rules_snapshot, rules_hash, "
-            "matrix_version, prompt_version, domain_history_id) "
-            "VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8, $9)",
+            "matrix_version, prompt_version, domain_history_id, idempotency_key) "
+            "VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, $7, $8, $9, $10) "
+            "ON CONFLICT (idempotency_key) DO NOTHING RETURNING id",
             analysis_id,
             filename_alias,
-            hashlib.sha256(masked_text.encode("utf-8")).hexdigest(),
+            text_sha256,
             json.dumps(params),
             canonical_json(snap.content),
             snap.hash,
             snap.matrix_version,
             snap.prompt_version,
             snap.history_id,
+            idempotency_key,
         )
+        if inserted is None:
+            holder = await conn.fetchrow(
+                "SELECT id, text_sha256 = $2 AND filename_alias = $3 AS same_input "
+                "FROM analyses WHERE idempotency_key = $1",
+                idempotency_key,
+                text_sha256,
+                filename_alias,
+            )
+            raise AnalysisKeyTaken(holder["id"], same_input=holder["same_input"])
         await _insert_steps(
             conn,
             analysis_id,

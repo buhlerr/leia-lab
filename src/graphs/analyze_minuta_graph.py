@@ -98,6 +98,7 @@ class AnalyzeMinutaState(TypedDict, total=False):
     filename: MaskedText  # apelido publico (documento-<sha8>.<ext>), nunca o nome real
     text: MaskedText
     analysis_id: str
+    idempotency_key: str  # so a API manda; nomeia no maximo uma analise
     rules: dict[str, Any]  # conteudo da foto das regras (sem dado pessoal)
     rules_meta: dict[str, Any]  # hash, matrix_version, prompt_version, history_id
     tipo: str
@@ -223,9 +224,21 @@ async def _owned_analysis(pool: asyncpg.Pool, inp: dict[str, str]) -> AsyncItera
         raise
 
 
-async def analyze(graph: AnalyzeMinutaGraph, *, config: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
-    """``prepare_input`` + execucao do grafo; devolve o estado final."""
-    inp = await prepare_input(**kwargs)
+async def analyze(
+    graph: AnalyzeMinutaGraph,
+    *,
+    config: dict[str, Any] | None = None,
+    idempotency_key: str | None = None,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """``prepare_input`` + execucao do grafo; devolve o estado final.
+
+    Com ``idempotency_key`` ja usada, ``iniciar`` nao grava nada e a execucao levanta
+    ``AnalysisKeyTaken`` antes de qualquer chamada externa.
+    """
+    inp: dict[str, str] = await prepare_input(**kwargs)
+    if idempotency_key is not None:
+        inp["idempotency_key"] = idempotency_key
     async with _owned_analysis(graph.pool, inp):
         return await graph.compiled.ainvoke(inp, _run_config(config, inp))
 
@@ -307,7 +320,8 @@ def build_analyze_minuta_graph(
     async def iniciar(state: AnalyzeMinutaState) -> dict[str, Any]:
         # Todo texto que entra no grafo veio de prepare_input: raw_text, file_path ou str comum param aqui.
         require_masked(
-            {"text": "", **{k: v for k, v in state.items() if k != "analysis_id"}}, what="analyze graph input"
+            {"text": "", **{k: v for k, v in state.items() if k not in ("analysis_id", "idempotency_key")}},
+            what="analyze graph input",
         )
         # Sem analysis_id a execucao nao veio de analyze(), e ninguem terminaria a linha se ela parasse.
         aid = state.get("analysis_id")
@@ -317,7 +331,15 @@ def build_analyze_minuta_graph(
         alias = state.get("filename", "")
         # Falha alto aqui (RulesConfigError), antes de qualquer chamada externa, se faltar regra.
         snap = await load_rules_snapshot(pool)
-        await start_analysis(pool, snap, analysis_id=aid, filename_alias=alias, masked_text=text, params=params)
+        await start_analysis(
+            pool,
+            snap,
+            analysis_id=aid,
+            filename_alias=alias,
+            masked_text=text,
+            params=params,
+            idempotency_key=state.get("idempotency_key"),
+        )
         tag_analysis(aid)  # amarra o traco (LangSmith/MLflow) a esta analise; no-op sem rastreio
         meta = {
             "hash": snap.hash,
