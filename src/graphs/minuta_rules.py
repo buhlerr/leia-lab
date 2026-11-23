@@ -351,6 +351,8 @@ def validate_and_format(doc_state: dict[str, Any]) -> tuple[str, dict[str, Any],
         ]
         if stats.get("nao_redigidas"):
             obs.append(f"{stats['nao_redigidas']} clausulas ficaram sem redacao por causa do limite.")
+        if stats.get("sem_orcamento"):
+            obs.append(f"{stats['sem_orcamento']} clausulas ficaram sem redacao: o teto de custo por analise foi atingido.")
         if stats.get("falhas_redacao"):
             obs.append(f"{stats['falhas_redacao']} clausulas falharam na redacao.")
         env.update(

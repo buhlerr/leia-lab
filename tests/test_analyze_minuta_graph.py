@@ -1,3 +1,5 @@
+import asyncio
+
 from src.db.connection import init_db
 from src.db.seed import seed_defaults
 from src.graphs.analyze_minuta_graph import analyze, build_analyze_minuta_graph
@@ -203,3 +205,33 @@ async def test_tema_map_ids_resolve_to_citation_without_duplicates_or_empty_norm
         assert all(n["texto"] for n in cl["normas"])  # no empty-text norm reaches the writer
         assert "lei-10192-2001-art-2" not in citacoes and "lei-9999-inexistente" not in citacoes
     assert any(n["citacao"] == "Lei 10.192/2001, art. 2º" for cl in out["clausulas"] for n in cl["normas"])
+
+
+async def test_cost_budget_caps_redaction_and_reports_it(pool, settings, monkeypatch):
+    # Teto de 0.05 US$ com 0.02 por chamada: a 4a clausula em diante fica sem redacao.
+    import src.graphs.analyze_minuta_graph as mod
+    from src.clients.llm import ChatResult
+
+    monkeypatch.setattr(mod, "_CONCURRENCY", 1)  # serializa: a ordem da fila decide quem e redigido
+
+    async def fake_chat(system_prompt, user_prompt, s=None, *, temperature=0.1, max_tokens=None, json_output=False):
+        await asyncio.sleep(0)  # cede o loop como o HTTP real: pega checagem de teto feita fora do semaforo
+        return ChatResult('{"alertas": []}', 30, 0.02 if json_output else 99.0)
+
+    monkeypatch.setattr(mod, "chat_completion", fake_chat)
+    clausulas = "\n".join(
+        f"Cláusula {i}ª - Do Reajuste: O aluguel será reajustado semestralmente pelo índice IGP-M, "
+        "conforme ajustado entre as partes neste instrumento contratual de locação residencial."
+        for i in range(1, 9)
+    )
+    await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
+    graph = mod.build_analyze_minuta_graph(pool, settings.model_copy(update={"ANALYSIS_MAX_COST_USD": 0.05}))
+    out = await analyze(graph, raw_text="CONTRATO DE LOCAÇÃO RESIDENCIAL\n" + clausulas, filename="m.txt")
+
+    assert sum(1 for cl in out["clausulas"] if "analise" in cl) == 3
+    stats = out["stats"]
+    assert stats["custo_usd_redacao"] == 0.06
+    assert stats["sem_orcamento"] == 5
+    assert stats["falhas_redacao"] == 0  # clausula sem orcamento nao e falha
+    remarks = out["report_envelope"]["remarks"]
+    assert any("5 clausulas ficaram sem redacao: o teto de custo por analise foi atingido." in o for o in remarks)
