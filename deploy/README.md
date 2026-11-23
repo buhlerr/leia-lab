@@ -1,7 +1,7 @@
 # Deploy do admin (Django) e da API no CT 116
 
 O admin edita as regras (tipos, temas, matriz, prompts) e a base normativa, e mostra histórico,
-análises e trilha **só para leitura**. Em produção fica atrás do Pangolin, em https://admin.rauvbr.com,
+análises e trilha **só para leitura**. Em produção fica atrás do Cloudflare Tunnel e do Cloudflare Access, em https://admin.rauvbr.com,
 com a porta 8000 fechada para a LAN (firewall em `deploy/firewall/`). Ver `docs/OPERACAO.md`.
 
 ## Uma vez, no Postgres (como dono das tabelas, ex. `leia`)
@@ -44,7 +44,7 @@ A mesma imagem serve a API: no compose, o serviço `api` troca o entrypoint por 
 CREATE ROLE api_login LOGIN PASSWORD '<senha>' IN ROLE leia_app;   -- grants do motor (leia_app); não é dono das tabelas
 ```
 
-Endereço, Pangolin e como atualizar: `docs/OPERACAO.md`.
+Endereço, túnel e como atualizar: `docs/OPERACAO.md`.
 
 ## Análise pela tela
 
