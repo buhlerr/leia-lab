@@ -1,6 +1,6 @@
 # Agent Instructions
 
-leia-lab analyses Brazilian residential lease contracts ("minutas"). A file is read and masked locally, a LangGraph pipeline checks each clause against a versioned risk matrix in Postgres, and every run leaves an immutable `analyses` row plus an append-only `analysis_trail`. Users touch it through the CLI; the risk matrix is edited in a Django Admin. Domain terms: `GLOSSARY.md`. Decisions: `docs/adr/`. Production ops (homelab CT 116, backups, Pangolin): `docs/OPERACAO.md`.
+leia-lab analyses Brazilian residential lease contracts ("minutas"). A file is read and masked locally, a LangGraph pipeline checks each clause against a versioned risk matrix in Postgres, and every run leaves an immutable `analyses` row plus an append-only `analysis_trail`. Users touch it through the CLI; the risk matrix is edited in a Django Admin. Domain terms: `GLOSSARY.md`. Decisions: `docs/adr/`. Production ops (homelab CT 116, backups, Cloudflare Tunnel): `docs/OPERACAO.md`.
 
 ## Layout
 
@@ -19,9 +19,9 @@ Production lives in the homelab, container CT 116. Look there, not in a local ch
 
 | Thing | Where | How to reach it |
 |---|---|---|
-| Admin (risk matrix, "Nova análise", each analysis with its report and trail) | https://admin.rauvbr.com | Pangolin SSO, then Django login |
+| Admin (risk matrix, "Nova análise", each analysis with its report and trail) | https://admin.rauvbr.com | Cloudflare Access (e-mail code), then Django login |
 | API | https://leia-api.rauvbr.com (`/docs`) | Bearer `LEIA_API_TOKEN`, kept in `/root/leia/api.env` on CT 116. `GET /v1/analyses/{id}` returns the report and trail. The API has no route that lists analyses |
-| MLflow (API traces, tagged `leia.analysis_id`) | https://mlflow.rauvbr.com, internal `http://leia-mlflow:5000` | Pangolin SSO, or the "trace" link on the analysis page |
+| MLflow (API traces, tagged `leia.analysis_id`) | https://mlflow.rauvbr.com, internal `http://leia-mlflow:5000` | Cloudflare Access (e-mail code), or the "trace" link on the analysis page |
 | LangSmith (CLI traces, only with `--trace`) | Project `leia-lab` | Owner's account |
 | Production Postgres (`leia_lab`, shared with Directus): `analyses`, `analysis_trail`, matrix | CT 116, container `leia-lab-postgres`, `192.168.0.120:5432` | Through Proxmox `pve` (`192.168.0.9` on the LAN, `100.101.28.59` on Tailscale): `ssh pve "pct exec 116 -- docker exec leia-lab-postgres psql -U leia -d leia_lab"`. Set `default_transaction_read_only=on` before reading |
 | Daily `pg_dump` backups | `/var/backups/leia/` on `pve` | `ssh pve` |

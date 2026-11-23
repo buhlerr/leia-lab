@@ -4,33 +4,39 @@ Como o que está em produção no homelab é protegido, restaurado e vigiado. Ac
 Proxmox (`pve`, 192.168.0.9) com `pct exec 116`. **Não use SSH direto em 192.168.0.120**: outro
 aparelho na rede já respondeu por esse IP (conflito de ARP, ver bead `leia-lab-1g1.10`).
 
-## Acesso ao admin: só por HTTPS, pelo Pangolin
+## Acesso público: Cloudflare Tunnel (migrado do Pangolin em 2026-11-23)
 
-| Peça | Estado (2026-11-16) |
+Em 2026-11-23 a VPS Oracle do Pangolin (`137.131.254.251`) parou de responder em 80/443 (TCP aceita,
+TLS trava). `admin`, `leia-api` e `mlflow` saíram do Pangolin e passaram para um Cloudflare Tunnel. Os
+demais subdomínios ainda caem no wildcard `*.rauvbr.com` → Oracle.
+
+| Peça | Estado (2026-11-23) |
 |---|---|
-| Endereço | **https://admin.rauvbr.com** (recurso Pangolin id 54, org `vitor`), SSL e **SSO do Pangolin** na frente |
-| Caminho | Pangolin (VPS Oracle) → site Newt `proxmox` → `192.168.0.120:8000` (CT 116) |
-| HTTP | `http://admin.rauvbr.com` redireciona para HTTPS |
-| Porta 8000 na LAN | **fechada**: só os conectores Newt (host pve `192.168.0.9` e CT 103 `192.168.0.128`) passam. Firewall `leia-admin-firewall.service` no CT 116 (cadeia `LEIA-ADMIN` em `DOCKER-USER`, reaplicada no boot) |
-| Django | `DJANGO_ALLOWED_HOSTS` e `DJANGO_CSRF_TRUSTED_ORIGINS` com `admin.rauvbr.com`; `DJANGO_BEHIND_HTTPS_PROXY=true` (cookies `Secure`) entra no deploy seguinte |
+| Túnel | `homelab` (id `50694789-7da4-40e4-ab31-27ac2c5f88e3`), gerenciado pelo painel/API da Cloudflare (conta "Vitor Account") |
+| Conector | `cloudflared` no **CT 103** (`192.168.0.128`, o mesmo do Newt), serviço systemd `cloudflared`, token em `/etc/cloudflared/tunnel.env` (chmod 600) |
+| Rotas (ingress) | `admin.rauvbr.com` → `http://192.168.0.120:8000`, `leia-api.rauvbr.com` → `:8080`, `mlflow.rauvbr.com` → `:5000`; o resto → 404 |
+| DNS | CNAME proxied de cada nome para `50694789-7da4-40e4-ab31-27ac2c5f88e3.cfargotunnel.com`; ganham do wildcard |
+| Login | **Cloudflare Access** (org `vbrrau.cloudflareaccess.com`, código por e-mail) em `admin` e `mlflow`, aplicações `leia admin` e `leia mlflow`, política `donos`. `leia-api` sem Access: a barreira é o bearer |
+| Portas 8000/8080 na LAN | **fechadas**: só os conectores (host pve `192.168.0.9` e CT 103 `192.168.0.128`) passam. Firewall `leia-admin-firewall.service` no CT 116 (cadeia `LEIA-ADMIN` em `DOCKER-USER`, reaplicada no boot) |
+| Django | `DJANGO_ALLOWED_HOSTS` e `DJANGO_CSRF_TRUSTED_ORIGINS` com `admin.rauvbr.com`; `DJANGO_BEHIND_HTTPS_PROXY=true` |
 
-Quem pode entrar é decidido no Pangolin (recurso → Authentication: usuários e papéis), antes do login
-do Django. Para incluir uma pessoa: dê acesso ao recurso no Pangolin **e** crie o usuário no Django nos
-grupos `editor` ou `leitor`.
+Quem pode entrar no admin e no mlflow é decidido no Cloudflare Access (Zero Trust → Access →
+Applications → política `donos`), antes do login do Django. Para incluir uma pessoa: adicione o e-mail na
+política **e** crie o usuário no Django nos grupos `editor` ou `leitor`.
 
-API de integração do Pangolin: `https://pangolin.rauvbr.com/v1` (rota `integration-api-rauvbr` no
-`dynamic_config.yml` do Traefik na VPS, backup `dynamic_config.yml.bak-integration-rauvbr-20261116`).
-A chave fica no **Shelve** (time `vitor`, projeto `LEIA`), ver "Segredos" abaixo.
+Estado do túnel: `ssh pve "pct exec 103 -- systemctl status cloudflared"` e
+`journalctl -u cloudflared` no CT 103. Se o conector mudar de máquina, atualize os IPs em
+`/usr/local/sbin/leia-admin-firewall.sh` no CT 116 e rode `systemctl restart leia-admin-firewall`.
 
-Se um Newt mudar de máquina, atualize os IPs em `/usr/local/sbin/leia-admin-firewall.sh` no CT 116 e
-rode `systemctl restart leia-admin-firewall`.
+O Newt e o Pangolin continuam instalados para os outros serviços; a chave `PANGOLIN_API_KEY` do Shelve só
+vale para eles.
 
 ## API para a camada FE: https://leia-api.rauvbr.com
 
 | Peça | Estado (2026-11-21) |
 |---|---|
-| Endereço | **https://leia-api.rauvbr.com** (recurso Pangolin id 57, org `vitor`), SSL, **sem SSO**: a barreira é o bearer `LEIA_API_TOKEN` (o FE chama do servidor dele) |
-| Caminho | Pangolin → site Newt `proxmox` → `192.168.0.120:8080` (CT 116) |
+| Endereço | **https://leia-api.rauvbr.com** (Cloudflare Tunnel `homelab`), SSL, **sem Access**: a barreira é o bearer `LEIA_API_TOKEN` (o FE chama do servidor dele) |
+| Caminho | Cloudflare → túnel `homelab` (cloudflared no CT 103) → `192.168.0.120:8080` (CT 116) |
 | Serviço | `api` no `/root/leia/docker-compose.yml` (container `leia-api`, imagem `leia-api:<sha>`, build de `/root/leia/api`, separado do `management/` do admin), `entrypoint: python -m src.api`, healthcheck em `/healthz` |
 | Segredos | `/root/leia/api.env` (chmod 600): `DATABASE_URL` do login `api_login` (membro de `leia_app`, não dono) e `LEIA_API_TOKEN` (64 hex). Gerados no próprio CT, nunca impressos |
 | Porta 8080 na LAN | **fechada**: mesma cadeia `LEIA-ADMIN` da 8000 (`deploy/firewall/`) |

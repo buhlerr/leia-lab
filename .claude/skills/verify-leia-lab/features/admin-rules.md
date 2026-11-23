@@ -12,7 +12,7 @@ An editor signs in to the Django Admin and edits the rules the analysis reads: m
 
 ## How to get to it (user POV)
 
-- Browser at `http://127.0.0.1:<port>/admin/` (production: https://admin.rauvbr.com behind Pangolin SSO, never driven by this skill).
+- Browser at `http://127.0.0.1:<port>/admin/` (production: https://admin.rauvbr.com behind Cloudflare Access, never driven by this skill).
 - Domain sections: Domain → Risk matrix / Themes / Minuta types / Prompts; each row has a change form with a Salvar button.
 
 ## Driving it with verify.py
