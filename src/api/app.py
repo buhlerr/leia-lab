@@ -34,26 +34,10 @@ from src.api.schemas import AnalysisResult
 from src.api.service import evaluate_upload, load_analysis
 from src.config import Settings
 from src.graphs.analyze_minuta_graph import build_analyze_minuta_graph
-from src.ingest.extract import (
-    MAX_UPLOAD_BYTES,
-    DocumentError,
-    DocumentTooLargeError,
-    EmptyDocumentError,
-    InvalidDocumentError,
-    UnsupportedFileError,
-)
+from src.ingest.extract import MAX_UPLOAD_BYTES, DocumentError
 from src.tracing import configure_mlflow, mlflow_request, shutdown_mlflow, use_short_mlflow_http
 
 _log = logging.getLogger(__name__)
-
-# Erros do nucleo -> (HTTP, codigo fixo, mensagem generica), numa tabela so.
-# O corpo de erro nunca ecoa conteudo do documento nem o nome real do arquivo.
-_ERROR_MAP: dict[type[DocumentError], tuple[int, str, str]] = {
-    UnsupportedFileError: (415, "unsupported_file", "Formato de arquivo nao suportado; envie .pdf, .docx ou .txt."),
-    DocumentTooLargeError: (413, "document_too_large", "O arquivo excede o limite de tamanho permitido."),
-    InvalidDocumentError: (422, "invalid_document", "O documento enviado nao pode ser lido."),
-    EmptyDocumentError: (422, "empty_document", "O documento enviado nao contem texto extraivel."),
-}
 
 _401_BODY = {"code": "unauthorized", "message": "Token de servico ausente ou invalido."}
 
@@ -114,14 +98,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.exception_handler(StarletteHTTPException)
     async def _http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
-        # Envelope unico de erro: {"code", "message"}, igual ao mapa de _ERROR_MAP.
+        # Envelope unico de erro: {"code", "message"}, o mesmo dos DocumentError.
         detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
         return JSONResponse(status_code=exc.status_code, content=detail)
 
     @app.exception_handler(DocumentError)
     async def _document_error(request: Request, exc: DocumentError) -> JSONResponse:
-        status, code, message = _ERROR_MAP.get(type(exc), _ERROR_MAP[InvalidDocumentError])
-        return JSONResponse(status_code=status, content={"code": code, "message": message})
+        # O corpo nunca ecoa o documento nem o nome real do arquivo: so o contrato da classe.
+        return JSONResponse(status_code=exc.http_status, content={"code": exc.code, "message": exc.public_message})
 
     @app.post(
         "/v1/analyses",

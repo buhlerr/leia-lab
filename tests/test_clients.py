@@ -53,9 +53,14 @@ async def test_call_jev_retries_on_429_and_parses_response():
         {"tipo": {"type": "choice", "instructions": "?", "criteria": {"locacao_residencial": "A"}}},
         settings,
     )
-    assert route.call_count == 2
+    # O 429 nao vira erro: o chamador recebe a resposta da tentativa seguinte.
     assert res["answers"]["tipo"]["choice"] == "locacao_residencial"
     assert res["usage"]["input_tokens"] == 42
+    # O servidor viu a MESMA pergunta na retentativa -- e so ela: um terceiro
+    # pedido esgotaria o script do mock e derrubaria o teste.
+    pedidos = [c.request for c in route.calls]
+    assert len(pedidos) == 2
+    assert pedidos[0].content == pedidos[1].content
 
 
 @respx.mock

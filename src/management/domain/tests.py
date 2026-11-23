@@ -17,7 +17,6 @@ from uuid import uuid4
 
 import httpx
 from django import forms
-from django.contrib.admin.sites import site
 from django.contrib.auth.models import Group, User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
@@ -283,17 +282,38 @@ class AdminSmokeTests(SchemaMixin, TestCase):
 
     def test_admin_exibe_todas_as_tabelas(self):
         self.client.force_login(self.admin)
+        indice = self.client.get(reverse("admin:index")).content.decode()
         for model in ALL_MODELS:
             url = reverse(f"admin:domain_{model._meta.model_name}_changelist")
-            self.assertEqual(self.client.get(url).status_code, 200, url)
-            self.assertIn(model, site._registry)
+            self.assertIn(url, indice)  # o indice lista a tabela...
+            self.assertEqual(self.client.get(url).status_code, 200, url)  # ...e a pagina abre
 
     def test_admin_bloqueia_escrita_nos_auditaveis(self):
-        for model in AUDIT_MODELS:
-            model_admin = site._registry[model]
-            self.assertFalse(model_admin.has_add_permission(None))
-            self.assertFalse(model_admin.has_change_permission(None))
-            self.assertFalse(model_admin.has_delete_permission(None))
+        # Nem superuser escreve nas tabelas de auditoria pelo admin: add, POST de
+        # alteracao e POST de exclusao dao 403, e a linha continua onde esta.
+        MinutaType.objects.create(slug="t-audit", name="T", classifier_description="d")
+        historico = DomainHistory.objects.filter(table_name="minuta_types").order_by("-id").first()
+        analise = _analysis()
+        trilha = AnalysisTrail.objects.create(
+            analysis=analise,
+            seq=1,
+            step="iniciar",
+            input_summary={},
+            decision={},
+            matrix_version="v1",
+            prompt_version="p1",
+            recorded_at=timezone.now(),
+        )
+        alvo = {DomainHistory: historico, Analysis: analise, AnalysisTrail: trilha}
+        self.client.force_login(self.admin)
+        for model, linha in alvo.items():
+            url_add = reverse(f"admin:domain_{model._meta.model_name}_add")
+            self.assertEqual(self.client.get(url_add).status_code, 403, url_add)
+            url_change = reverse(f"admin:domain_{model._meta.model_name}_change", args=[linha.pk])
+            self.assertEqual(self.client.post(url_change, {}).status_code, 403, url_change)
+            url_delete = reverse(f"admin:domain_{model._meta.model_name}_delete", args=[linha.pk])
+            self.assertEqual(self.client.post(url_delete, {"post": "yes"}).status_code, 403, url_delete)
+            self.assertTrue(model.objects.filter(pk=linha.pk).exists())
 
 
 # ---------------------------------------------------------------- nova analise (pela API)
@@ -439,9 +459,10 @@ class AnalysisDetailTests(SchemaMixin, TestCase):
             correndo = _analysis(status="running", finished_at=None, report=None, minuta_type=None)
             resp = self.client.get(reverse("admin:domain_analysis_change", args=[correndo.id]))
             self.assertEqual(resp.status_code, 200)
-            detalhe = site._registry[Analysis]
-            self.assertEqual(detalhe.duracao(correndo), "-")
-            self.assertEqual(detalhe.alertas(correndo), "nenhum")
+            corpo = resp.content.decode()
+            # Analise em curso: sem duracao (nao terminou) e sem alertas (sem relatorio).
+            self.assertRegex(corpo, r"Duração:</label>\s*<div[^>]*>\s*-\s*</div>")
+            self.assertRegex(corpo, r"Alertas:</label>\s*<div[^>]*>\s*nenhum\s*</div>")
 
 
 # ---------------------------------------------------------------- base normativa
