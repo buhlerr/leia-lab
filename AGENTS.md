@@ -38,9 +38,11 @@ Windows, Python 3.12+ in `.venv` managed by uv. Run commands from the repo root 
 
 ```bash
 uv sync                                   # install
-.venv/Scripts/python.exe -m pytest        # tests; need Postgres (TEST_DATABASE_URL, default localhost:5433/leia_lab_test)
+scripts/ci.sh                             # every check (pytest + Django); needs Postgres (TEST_DATABASE_URL, default localhost:5433/leia_lab_test)
 docker compose up -d postgres             # local Postgres 17 + pgvector on 5433, if the homelab one is not used
 ```
+
+`scripts/ci.sh` is the CI: DSR runs it (`required_checks: ["scripts/ci.sh"]` in its registry). A new kind of check goes in as a `step` there, never as a command only a doc mentions.
 
 The suite drops and recreates `public` in the test database; `tests/_db_guard.py` refuses any database not ending in `_test`. To prove a change end to end, use the `verify-leia-lab` skill (`.claude/skills/verify-leia-lab/`), not bare `python -m src.cli`: it pins a disposable `leia_lab_verify_<id>` database and blanks paid keys.
 
