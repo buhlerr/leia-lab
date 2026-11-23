@@ -248,3 +248,36 @@ async def test_cost_budget_caps_redaction_and_reports_it(pool, settings, monkeyp
     assert stats["falhas_redacao"] == 0  # clausula sem orcamento nao e falha
     remarks = out["report_envelope"]["remarks"]
     assert any("5 clausulas ficaram sem redacao: o teto de custo por analise foi atingido." in o for o in remarks)
+
+
+async def test_clauses_waiting_on_the_semaphore_recheck_the_budget_and_skip_chat(pool, settings, monkeypatch):
+    import src.graphs.analyze_minuta_graph as mod
+    from src.clients.llm import ChatResult
+
+    calls = 0
+
+    async def fake_chat(system_prompt, user_prompt, s=None, *, temperature=0.1, max_tokens=None, json_output=False):
+        nonlocal calls
+        calls += 1
+        await asyncio.sleep(0.01)
+        return ChatResult('{"alertas": []}', 30, 0.06 if json_output else 99.0)
+
+    monkeypatch.setattr(mod, "chat_completion", fake_chat)
+    clausulas = "\n".join(
+        f"Cláusula {i}ª - Do Reajuste: O aluguel será reajustado semestralmente pelo índice IGP-M, "
+        "conforme ajustado entre as partes neste instrumento contratual de locação residencial."
+        for i in range(1, 9)
+    )
+    await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
+    graph = mod.build_analyze_minuta_graph(
+        pool, settings.model_copy(update={"ANALYSIS_MAX_COST_USD": 0.05}), max_concurrency=2
+    )
+    out = await analyze(graph, raw_text="CONTRATO DE LOCAÇÃO RESIDENCIAL\n" + clausulas, filename="m.txt")
+
+    assert calls == 2
+    stats = out["stats"]
+    assert stats["sem_orcamento"] == 6
+    assert stats["custo_usd_redacao"] == 0.12
+    assert stats["falhas_redacao"] == 0
+    remarks = out["report_envelope"]["remarks"]
+    assert any("6 clausulas ficaram sem redacao: o teto de custo por analise foi atingido." in o for o in remarks)
