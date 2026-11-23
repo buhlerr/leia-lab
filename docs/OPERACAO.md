@@ -86,14 +86,21 @@ op run --env-file=.env.op -- scripts/linear-sync.sh --dry-run   # ver antes
 op run --env-file=.env.op -- scripts/linear-sync.sh             # sincronizar
 ```
 
-O script faz quatro passos: puxa tudo do Linear, envia as tarefas abertas, envia as fechadas que já estão
-no Linear (para irem a Done lá) e põe no projeto **`leia-lab`** do Linear toda issue deste repo que esteja
-sem projeto (`scripts/linear_project.py`; o `bd` não sabe de projetos). **Não rode `bd linear sync` puro:**
-ele enviaria as 62 tarefas fechadas antes do espelho, que ficam só no Beads. Não use `linear.project_id`:
-no `bd` ele restringe a sincronização a um projeto e bloqueia a criação de issues novas.
+O script (`scripts/linear_sync.py`) só age quando algo mudou:
 
-Um projeto do Linear por repositório: outro repo no mesmo time ganha o seu projeto e passa o nome dele ao
-`linear_project.py`. Os épicos do Beads continuam como issues-pai dentro do projeto.
+1. Pergunta ao Linear se alguma issue do time mudou desde a última rodada; só então puxa.
+2. Envia só os beads novos ou alterados (hash de título, descrição, status, prioridade, rótulos e pai):
+   os abertos e os fechados que já estão no Linear (para irem a Done lá).
+3. Põe no projeto **`leia-lab`** do Linear toda issue deste repo que esteja sem projeto.
+
+O estado (hashes e horário da última rodada) fica em `.local/linear-sync-state.json`, fora do git e por
+máquina; sem ele, a rodada é completa (cerca de 40 s). Sem mudanças, a rodada leva uns 2 s. Para forçar
+uma rodada completa, apague esse arquivo.
+
+**Não rode `bd linear sync` puro:** ele enviaria as 62 tarefas fechadas antes do espelho, que ficam só no
+Beads. Não use `linear.project_id`: no `bd` ele restringe a sincronização a um projeto e bloqueia a
+criação de issues novas. Um projeto do Linear por repositório (`PROJECT` no `linear_sync.py`); os épicos
+do Beads continuam como issues-pai dentro do projeto.
 
 - Estados: `open` → Todo, `in_progress` → In Progress, `closed` → Done. Na volta, Backlog e Todo viram
   `open`, In Progress e In Review viram `in_progress`, Done, Canceled e Duplicate viram `closed`.
