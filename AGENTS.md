@@ -46,6 +46,15 @@ The suite drops and recreates `public` in the test database; `tests/_db_guard.py
 
 Secrets come from Shelve (`shelve run --env production -- <cmd>` in Git Bash). Paid paths (real OpenRouter/TypeSafe keys, `--trace`) spend money; ask first.
 
+## Git
+
+This repository opts in to the **Team-maintainer** profile of the Beads block below, with one limit: the owner merges into `master`.
+
+- Work on a feature branch off `master` (`feat/…`, `fix/…`, `docs/…`). Commit small verified units on it, push it, and open a PR to `master` without asking.
+- Never merge into `master`, push to `master`, or force-push a branch someone else pushed to. The owner reviews and merges every PR.
+- Ask first for anything irreversible or paid: deploys to CT 116, writes to production Postgres, real OpenRouter/TypeSafe keys, `--trace`.
+- A "do not commit" or "do not push" in the current request still wins.
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:46cd31e7 -->
 ## Beads Issue Tracker
 
