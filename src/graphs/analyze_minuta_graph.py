@@ -261,6 +261,8 @@ def build_analyze_minuta_graph(
     """Compila o grafo de analise de minuta (roteamento condicional pos-classificacao).
 
     Regras nao sao argumentos: sao lidas do banco no inicio de cada analise (no ``iniciar``).
+    ``checkpointer`` e ferramenta de depuracao: retomar um ponto de controle invoca o grafo
+    sem ``analyze()`` e NAO termina a linha -- producao nao compila com checkpointer.
     """
     cfg = settings or Settings()
     params = {
