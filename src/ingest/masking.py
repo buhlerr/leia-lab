@@ -93,11 +93,28 @@ _Q = (
     r"(?i:brasileir[oa]|portugues[a]?|argentin[oa]|uruguai[oa]|estrangeir[oa]|naturalizad[oa]"
     r"|solteir[oa]|casad[oa]|divorciad[oa]|vi[úu]v[oa]|separad[oa]|maior\s+e\s+capaz)"
 )
-_R = (
-    r"(?i:nome(?:\s+completo)?|locador[a]?|locat[áa]ri[oa]|fiador[a]?|c[ôo]njuge"
-    r"|testemunha(?:\s*\d)?|propriet[áa]ri[oa]|inquilin[oa]|representante(?:\s+legal)?"
-    r"|respons[áa]vel|assinante)"
+_PARTY_LABELS = (
+    r"nome(?:\s+completo)?",
+    r"locador[a]?",
+    r"locat[áa]ri[oa]",
+    r"inquilin[oa]",
+    r"propriet[áa]ri[oa]",
+    r"fiador[a]?",
+    r"c[ôo]njuge",
+    r"contratante",
+    r"contratad[oa]",
+    r"outorgante",
+    r"outorgad[oa]",
+    r"interveniente",
+    r"anuente",
+    r"procurador[a]?",
+    r"representantes?(?:\s+lega(?:l|is))?",
+    r"respons[áa]ve(?:l|is)",
+    r"assinante",
+    r"testemunha(?:\s*\d)?",
 )
+_PLURAL_SUFFIX = r"(?:e?s)?(?:\s?\([aoe]?s?\)s?|/[ao]s?)*"
+_R = rf"(?i:(?:{'|'.join(_PARTY_LABELS)}){_PLURAL_SUFFIX})"
 _NAME_RULES = [
     re.compile(rf"({_NC})(?=\s*,\s*{_Q})"),
     re.compile(rf"{_R}\s*:\s*({_NC})"),
