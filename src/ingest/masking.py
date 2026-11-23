@@ -108,18 +108,23 @@ _PARTY_LABELS = (
     r"interveniente",
     r"anuente",
     r"procurador[a]?",
-    r"representante(?:\s+legal)?",
-    r"respons[áa]vel",
+    r"representantes?(?:\s+lega(?:l|is))?",
+    r"respons[áa]ve(?:l|is)",
     r"assinante",
     r"testemunha(?:\s*\d)?",
 )
-_PARTY_LABEL = rf"(?i:(?:{'|'.join(_PARTY_LABELS)})(?:e?s|\((?:a|o|as|os|es)\))?)"
-_LEADING_LABELS = re.compile(rf"^(?:{_PARTY_LABEL}\s+(?i:(?:e|ou)\s+)?)+")
+_PARTY_LABEL = rf"(?i:(?:{'|'.join(_PARTY_LABELS)})(?:e?s)?(?:\s?\([aoe]?s?\)s?|/[ao]s?)*)"
+_LEADING = re.compile(
+    rf"(?P<rotulo>(?:(?i:os?|as?)\s+)?(?:{_PARTY_LABEL}(?:\s+(?i:(?:e|ou)\s+)?|$))+)"
+    r"(?P<preposicao>(?i:de|da|do|dos|das)(?:\s+|$))?"
+)
+_ONE_PARTY = re.compile(rf"{_PARTY_LABEL}\s+")
+_PLURAL = re.compile(r"(?i)s\)?\s*$")
 _NAME_RULES = [
-    re.compile(rf"({_NC})(?=\s*,\s*{_Q})"),
-    re.compile(rf"{_PARTY_LABEL}\s*:\s*({_NC})"),
-    re.compile(rf"(?i:\bSr[a]?\.|\bSenhor[a]?)\s+({_NC})"),
-    re.compile(rf"({_NC})\s*,?\s*(?i:inscrit[oa]\s+no\s+|portador[a]?\s+do\s+)?C\.?P\.?F\b"),
+    (re.compile(rf"({_NC})(?=\s*,\s*{_Q})"), True),
+    (re.compile(rf"{_PARTY_LABEL}\s*:\s*({_NC})"), True),
+    (re.compile(rf"(?i:\bSr[a]?\.|\bSenhor[a]?)\s+({_NC})"), True),
+    (re.compile(rf"({_NC})\s*,?\s*(?i:inscrit[oa]\s+no\s+|portador[a]?\s+do\s+)?C\.?P\.?F\b"), False),
 ]
 _IGNORE = re.compile(
     r"(?i)^(contrato|cl[áa]usula|parte|partes|pessoa"
@@ -145,11 +150,29 @@ def mask_personal_data(text: str) -> MaskedText:
     if isinstance(text, MaskedText):
         return text
     nomes: set[str] = set()
-    for regra in _NAME_RULES:
+    no_lugar: set[tuple[int, int]] = set()
+    for regra, aceita_caixa_alta_apos_rotulo in _NAME_RULES:
         for m in regra.finditer(text):
-            nome = _LEADING_LABELS.sub("", m.group(1).strip())
-            if len(nome.split()) > 1 and not _IGNORE.match(nome):
+            lider = _LEADING.match(m.group(1))
+            inicio = m.start(1) + (lider.end() if lider else 0)
+            nome = text[inicio : m.end(1)]
+            if not nome or _IGNORE.match(nome):
+                continue
+            if not lider:
                 nomes.add(nome)
+                continue
+            if nome.isupper() and not aceita_caixa_alta_apos_rotulo:
+                continue
+            if len(nome.split()) > 1:
+                nomes.add(nome)
+            elif (
+                not lider["preposicao"]
+                and _ONE_PARTY.fullmatch(lider["rotulo"])
+                and not _PLURAL.search(lider["rotulo"])
+            ):
+                no_lugar.add((inicio, m.end(1)))
+    for inicio, fim in sorted(no_lugar, reverse=True):
+        text = f"{text[:inicio]}[NOME]{text[fim:]}"
     for nome in sorted(nomes, key=len, reverse=True):
         padrao = r"\s+".join(re.escape(p) for p in nome.split())
         text = re.sub(padrao, "[NOME]", text, flags=re.IGNORECASE)
