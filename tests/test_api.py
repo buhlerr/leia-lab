@@ -63,8 +63,9 @@ def api_settings() -> Settings:
     )
 
 
-def _auth() -> dict[str, str]:
-    return {"Authorization": f"Bearer {TOKEN}"}
+def _auth(idempotency_key: str | None = None) -> dict[str, str]:
+    """Bearer de servico + ``Idempotency-Key`` (uma chave nova por chamada, salvo se dada)."""
+    return {"Authorization": f"Bearer {TOKEN}", "Idempotency-Key": idempotency_key or str(uuid.uuid4())}
 
 
 @asynccontextmanager
@@ -251,6 +252,95 @@ async def test_get_unknown_uuid_returns_404_and_bad_uuid_returns_422(pool, api_s
 
         r = await client.get("/v1/analyses/nao-e-um-uuid", headers=_auth())
         assert r.status_code == 422
+
+
+# ---------------------------------------------------------------- idempotencia do POST
+
+
+class _JevCounter:
+    """Conta as chamadas externas (Jev) da analise: a chamada paga que um retry nao pode repetir."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from src.graphs import analyze_minuta_graph
+
+        self.calls = 0
+        real = analyze_minuta_graph.call_jev
+
+        async def counting(*args: object, **kwargs: object) -> object:
+            self.calls += 1
+            return await real(*args, **kwargs)
+
+        monkeypatch.setattr(analyze_minuta_graph, "call_jev", counting)
+
+
+async def _count_analyses(pool) -> int:
+    return await pool.fetchval("SELECT count(*) FROM analyses")
+
+
+def _txt(text: str = _MINUTA, name: str = "retry.txt") -> dict[str, tuple[str, bytes, str]]:
+    return {"file": (name, text.encode("utf-8"), "text/plain")}
+
+
+async def test_post_without_idempotency_key_returns_422(pool, api_settings) -> None:
+    await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
+    async with api_client(api_settings) as client:
+        r = await client.post("/v1/analyses", files=_txt(), headers={"Authorization": f"Bearer {TOKEN}"})
+    assert await _count_analyses(pool) == 0
+    assert r.status_code == 422
+
+
+async def test_retry_with_the_same_key_returns_the_first_analysis_without_running_again(
+    pool, api_settings, monkeypatch
+) -> None:
+    await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
+    jev = _JevCounter(monkeypatch)
+    key = str(uuid.uuid4())
+    async with api_client(api_settings) as client:
+        first = await client.post("/v1/analyses", files=_txt(), headers=_auth(key))
+        assert first.status_code == 201, first.text
+        paid_calls = jev.calls
+        retry = await client.post("/v1/analyses", files=_txt(), headers=_auth(key))
+    assert (await _count_analyses(pool), jev.calls) == (1, paid_calls)
+    assert retry.status_code == 200
+    assert retry.json() == first.json()
+
+
+async def test_same_key_with_a_different_document_returns_409(pool, api_settings) -> None:
+    await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
+    key = str(uuid.uuid4())
+    async with api_client(api_settings) as client:
+        first = await client.post("/v1/analyses", files=_txt(), headers=_auth(key))
+        assert first.status_code == 201, first.text
+        other = await client.post("/v1/analyses", files=_txt(_MINUTA + "\nCláusula 3ª - Do Foro."), headers=_auth(key))
+    assert await _count_analyses(pool) == 1
+    assert other.status_code == 409
+    assert other.json()["code"] == "idempotency_key_reused"
+
+
+async def test_two_concurrent_posts_with_one_key_create_one_row(pool, api_settings, monkeypatch) -> None:
+    """Os dois pedidos passam juntos de toda checagem previa e disputam o INSERT: so um grava."""
+    from src.graphs import analyze_minuta_graph
+
+    await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
+    both_read_rules = asyncio.Barrier(2)
+    real_load = analyze_minuta_graph.load_rules_snapshot
+
+    async def load_then_wait(p):
+        snap = await real_load(p)
+        await asyncio.wait_for(both_read_rules.wait(), 10)
+        return snap
+
+    monkeypatch.setattr(analyze_minuta_graph, "load_rules_snapshot", load_then_wait)
+    key = str(uuid.uuid4())
+    async with api_client(api_settings) as client:
+        a, b = await asyncio.gather(
+            client.post("/v1/analyses", files=_txt(), headers=_auth(key)),
+            client.post("/v1/analyses", files=_txt(), headers=_auth(key)),
+        )
+    assert await _count_analyses(pool) == 1
+    assert await pool.fetchval("SELECT count(*) FROM analysis_trail WHERE step = 'iniciar'") == 1
+    assert sorted([a.status_code, b.status_code]) == [200, 201]
+    assert a.json()["analysis_id"] == b.json()["analysis_id"]
 
 
 # ---------------------------------------------------------------- rastreio MLflow da API
