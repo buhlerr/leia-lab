@@ -27,7 +27,7 @@ step() {
 
 django_tests() { DATABASE_URL="$TEST_DATABASE_URL" DJANGO_DEBUG="false" py -m src.management.manage test src.management.domain --noinput; }
 
-step pytest py -m pytest -q -p no:cacheprovider
+step pytest py -m pytest -q --deselect tests/test_repo_hygiene.py::test_no_broken_cited_path_in_docs -p no:cacheprovider
 step docs-caminhos py -m pytest -q tests/test_repo_hygiene.py::test_no_broken_cited_path_in_docs -p no:cacheprovider
 step django django_tests
 step analysis-lifecycle bash .claude/skills/verify-analysis-lifecycle/scripts/check.sh

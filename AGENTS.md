@@ -19,7 +19,7 @@ Production lives in the homelab, container CT 116. Look there, not in a local ch
 
 **Windows** (`C:\Users\Vitor\dev\leia-lab`) is on the home LAN and holds the test minutas. Run commands in Git Bash.
 
-**VPS** (`/data/projects/leia-lab`, host `acfs`) reaches the homelab only through Tailscale: `ssh pve` is the `~/.ssh/config` alias (key `~/.ssh/leia_pve`), then `pct exec 116`. The LAN routes `192.168.0.9/32` and `192.168.0.120/32` are advertised by `pve`, but direct LAN IPs work only once they are approved in the Tailscale admin, so use the `ssh pve` path. The 1Password CLI `op` is installed in `~/.local/bin` with a read-only service account; run `export OP_SERVICE_ACCOUNT_TOKEN="$(cat ~/.config/op/leia-lab.token)"` before `op run`. The test minutas are here too (`leia-minutas-teste-mascaradas/`, git-ignored, `LEIA_MINUTAS_DIR`). The VPS Postgres on `localhost:5433` holds only test and `leia_lab_verify_*` databases, never production data.
+**VPS** (`/data/projects/leia-lab`, host `acfs`) reaches the homelab only through Tailscale: `ssh pve` is the `~/.ssh/config` alias (key `~/.ssh/leia_pve`), then `pct exec 116`. Never go at the homelab by its LAN IPs: the routes and why they fail live in one place, `docs/OPERACAO.md`; use the `ssh pve` path. The 1Password CLI `op` is installed in `~/.local/bin` with a read-only service account; run `export OP_SERVICE_ACCOUNT_TOKEN="$(cat ~/.config/op/leia-lab.token)"` before `op run`. The test minutas are here too (`leia-minutas-teste-mascaradas/`, git-ignored, `LEIA_MINUTAS_DIR`). The VPS Postgres on `localhost:5433` holds only test and `leia_lab_verify_*` databases, never production data.
 
 ## Build and test
 
