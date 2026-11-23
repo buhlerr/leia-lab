@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
+from contextlib import aclosing
 
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
@@ -13,7 +15,9 @@ from src.db.connection import init_db
 from src.db.defaults import LOCACAO_RESIDENCIAL as LOCACAO
 from src.db.rules import verify_snapshot
 from src.db.seed import seed_defaults
+from src.db.analyses import append_trail, finish_analysis
 from src.graphs.analyze_minuta_graph import AnalyzeMinutaState, analyze, analyze_stream, build_analyze_minuta_graph
+from src.ingest import masking
 
 NAME = "Carlos Eduardo Mendes"
 CPF = "999.888.777-66"
@@ -52,8 +56,8 @@ async def _leaks(pool, settings) -> tuple[dict[str, list[str]], dict]:
     graph = build_analyze_minuta_graph(pool, settings, checkpointer=saver)
     cfg = {"configurable": {"thread_id": "t1"}}
     updates = [c async for c in analyze_stream(graph, raw_text=RAW, filename=FILE_NAME, config=cfg)]
-    final = (await graph.aget_state(cfg)).values
-    checkpoints = [s async for s in graph.aget_state_history(cfg)]
+    final = (await graph.compiled.aget_state(cfg)).values
+    checkpoints = [s async for s in graph.compiled.aget_state_history(cfg)]
     assert len(checkpoints) > 3 and final.get("suportado") is True  # a analise passou por todos os passos
 
     trail = [r["j"] for r in await pool.fetch("SELECT to_jsonb(t)::text AS j FROM analysis_trail t")]
@@ -84,15 +88,24 @@ async def test_no_personal_data_in_state_checkpoint_updates_trail_snapshot_or_re
 
 async def test_the_scan_catches_the_leak_when_masking_is_switched_off(seeded, settings, monkeypatch):
     """Prova de que o teste acima mede algo: sem mascaramento, o varredor tem de acusar."""
-    monkeypatch.setattr(mod, "mask_personal_data", lambda text: text)
-    monkeypatch.setattr(mod, "resolve_doc_alias", lambda filename, doc_name="": filename)
+    # Mascaramento desligado: sem regras, o texto cru sai como MaskedText e o grafo roda ate o fim.
+    monkeypatch.setattr(masking, "_NAME_RULES", [])
+    monkeypatch.setattr(masking, "_RULES", [])
+    monkeypatch.setattr(mod, "resolve_doc_alias", lambda filename, doc_name="": masking._masked(filename))
     leaks, _ = await _leaks(seeded, settings)
     for place in ("estado", "checkpoint", "updates por no", "trilha", "relatorio"):
         assert {NAME, CPF} <= set(leaks[place]) or FILE_NAME in leaks[place], place
     assert FILE_NAME in leaks["trilha"] and FILE_NAME in leaks["relatorio"]
 
 
-@pytest.mark.parametrize("bad_input", [{"raw_text": RAW, "filename": "x.txt"}, {"text": RAW, "filename": "x.txt"}])
+@pytest.mark.parametrize(
+    "bad_input",
+    [
+        {"raw_text": RAW, "filename": "x.txt"},
+        {"text": RAW, "filename": "x.txt"},
+        {"text": "CONTRATO DE LOCACAO RESIDENCIAL", "filename": "x.txt"},  # mascarado, mas sem analysis_id
+    ],
+)
 async def test_graph_refuses_input_that_did_not_go_through_analyze(seeded, settings, monkeypatch, bad_input):
     async def boom(*a, **k):
         raise AssertionError("nenhuma chamada externa com texto cru")
@@ -100,7 +113,7 @@ async def test_graph_refuses_input_that_did_not_go_through_analyze(seeded, setti
     monkeypatch.setattr(mod, "call_jev", boom)
     graph = build_analyze_minuta_graph(seeded, settings)
     with pytest.raises(ValueError, match="analyze") as exc:
-        await graph.ainvoke(bad_input)
+        await graph.compiled.ainvoke(bad_input)
     assert not _found(str(exc.value))
     assert await seeded.fetchval("SELECT count(*) FROM analyses") == 0
 
@@ -164,7 +177,164 @@ async def test_a_failing_step_marks_the_analysis_failed_with_the_error_type_only
         await analyze(build_analyze_minuta_graph(seeded, settings), raw_text=RAW, filename=FILE_NAME)
     row = await seeded.fetchrow("SELECT id, status, report, finished_at FROM analyses")
     assert row["status"] == "failed" and row["finished_at"] is not None
-    assert json.loads(row["report"]) == {"error": "RuntimeError", "step": "buscar"}
+    assert json.loads(row["report"]) == {"error": "RuntimeError"}
     steps = [r["step"] for r in await seeded.fetch("SELECT step FROM analysis_trail WHERE analysis_id = $1 ORDER BY seq", row["id"])]
     assert steps[-1] == "triar" and "buscar" not in steps  # a trilha mostra ate onde chegou
     assert isinstance(row["id"], uuid.UUID)
+
+
+async def _only_analysis(pool) -> tuple[dict, list[str]]:
+    row = await pool.fetchrow("SELECT id, status, report, finished_at FROM analyses")
+    steps = [r["step"] for r in await pool.fetch("SELECT step FROM analysis_trail WHERE analysis_id = $1 ORDER BY seq", row["id"])]
+    return {**row, "report": json.loads(row["report"]) if row["report"] else None}, steps
+
+
+async def test_a_failure_right_after_the_insert_marks_the_analysis_failed(seeded, settings, monkeypatch):
+    """PR #31: a linha ja existe, mas o estado do grafo ainda nao tem o analysis_id."""
+
+    def explode(analysis_id):
+        raise RuntimeError(f"rastreio caiu com {NAME}")
+
+    monkeypatch.setattr(mod, "tag_analysis", explode)
+    with pytest.raises(RuntimeError):
+        await analyze(build_analyze_minuta_graph(seeded, settings), raw_text=RAW, filename=FILE_NAME)
+    row, steps = await _only_analysis(seeded)
+    assert (row["status"], row["report"], steps) == ("failed", {"error": "RuntimeError"}, ["iniciar"])
+    assert row["finished_at"] is not None
+
+
+async def test_a_cancelled_analysis_ends_failed(seeded, settings, monkeypatch):
+    """Cliente que desconecta ou timeout: o CancelledError nao e Exception e nao pode deixar 'running'."""
+    calling = asyncio.Event()
+
+    async def hang(*a, **k):
+        calling.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(mod, "call_jev", hang)
+    run = asyncio.create_task(analyze(build_analyze_minuta_graph(seeded, settings), raw_text=RAW, filename=FILE_NAME))
+    await calling.wait()
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run
+    row, steps = await _only_analysis(seeded)
+    assert (row["status"], row["report"], steps) == ("failed", {"error": "CancelledError"}, ["iniciar"])
+    assert row["finished_at"] is not None
+
+
+async def test_a_second_cancel_during_the_failure_write_still_ends_the_row_failed(seeded, settings, monkeypatch):
+    """2o cancelamento durante a escrita de falha: analyze() so termina DEPOIS da linha virar 'failed'."""
+    handler_started = asyncio.Event()
+    real_fail = mod.fail_analysis
+
+    async def slow_fail(pool, analysis_id, error):
+        handler_started.set()
+        await asyncio.sleep(0.05)  # janela em que o 2o cancelamento chega durante a escrita
+        await real_fail(pool, analysis_id, error)
+
+    monkeypatch.setattr(mod, "fail_analysis", slow_fail)
+    calling = asyncio.Event()
+
+    async def hang(*a, **k):
+        calling.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(mod, "call_jev", hang)
+    run = asyncio.create_task(analyze(build_analyze_minuta_graph(seeded, settings), raw_text=RAW, filename=FILE_NAME))
+    await calling.wait()
+    run.cancel()
+    await handler_started.wait()  # a escrita de falha comecou: o 2o cancelamento chega AQUI
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await run
+    row, steps = await _only_analysis(seeded)
+    assert (row["status"], row["report"], steps) == ("failed", {"error": "CancelledError"}, ["iniciar"])
+    assert row["finished_at"] is not None
+
+
+async def test_a_failure_write_that_never_returns_releases_the_request(seeded, settings, monkeypatch, caplog):
+    """Banco travado na escrita de falha: o pedido termina com aviso, em vez de pendurar para sempre."""
+    handler_started = asyncio.Event()
+
+    async def stuck_fail(pool, analysis_id, error):
+        handler_started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(mod, "fail_analysis", stuck_fail)
+    monkeypatch.setattr(mod, "_FAILURE_WRITE_TIMEOUT", 0.05)
+    calling = asyncio.Event()
+
+    async def hang(*a, **k):
+        calling.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(mod, "call_jev", hang)
+    run = asyncio.create_task(analyze(build_analyze_minuta_graph(seeded, settings), raw_text=RAW, filename=FILE_NAME))
+    await calling.wait()
+    run.cancel()
+    with pytest.raises(asyncio.CancelledError):  # sem o teto, este await pendurava para sempre
+        await asyncio.wait_for(run, timeout=2)
+    assert handler_started.is_set()
+    assert "a escrita de falha nao terminou" in caplog.text
+
+
+async def test_a_stream_consumer_that_stops_early_closes_the_row(seeded, settings, monkeypatch):
+    """Quem consome analyze_stream para antes do fim e fecha o iterador: a linha termina 'failed'."""
+    graph = build_analyze_minuta_graph(seeded, settings)
+    async with aclosing(analyze_stream(graph, raw_text=RAW, filename=FILE_NAME)) as stream:
+        async for _update in stream:
+            break  # consumidor satisfeito com o primeiro update: a analise NAO terminou
+    row, steps = await _only_analysis(seeded)
+    assert (row["status"], row["report"], steps) == ("failed", {"error": "GeneratorExit"}, ["iniciar"])
+    assert row["finished_at"] is not None
+
+
+# ---------------------------------------------------------------- a escrita ao banco e fail-safe
+
+
+async def test_a_trail_step_that_carries_raw_text_is_masked_at_the_write(seeded):
+    """Revisao do PR #42 (achado proprio): um passo malcomportado que monte texto cru
+    nao chega cru ao analysis_trail -- a escrita mascara na fronteira do banco."""
+    aid = str(uuid.uuid4())
+    await seeded.execute(
+        "INSERT INTO analyses (id, filename_alias, text_sha256, rules_snapshot, rules_hash, matrix_version, "
+        "prompt_version, domain_history_id) VALUES ($1::uuid, 'documento-x.txt', 'h', '{}'::jsonb, 'rh', 'mv', 'pv', 0)",
+        aid,
+    )
+    await append_trail(
+        seeded,
+        aid,
+        {"matrix_version": "v", "prompt_version": "p"},
+        [
+            {
+                "step": "triar",
+                "clause_n": 1,
+                "input_summary": {"excerpt": f"LOCADOR: {NAME}, CPF {CPF}."},
+                "decision": {"observacao": f"e-mail {EMAIL} citado no corpo"},
+            }
+        ],
+    )
+    written = await seeded.fetchrow("SELECT input_summary::text AS i, decision::text AS d FROM analysis_trail")
+    blob = written["i"] + written["d"]
+    assert [s for s in (NAME, CPF, EMAIL, "99988877766") if s in blob] == []  # nada cru no banco
+    assert "[CPF]" in blob and "[EMAIL]" in blob
+
+
+async def test_a_report_that_carries_raw_text_is_masked_at_the_write(seeded):
+    """O mesmo fail-safe vale para o relatorio gravado em analyses."""
+    aid = str(uuid.uuid4())
+    await seeded.execute(
+        "INSERT INTO analyses (id, filename_alias, text_sha256, rules_snapshot, rules_hash, matrix_version, "
+        "prompt_version, domain_history_id) VALUES ($1::uuid, 'documento-x.txt', 'h', '{}'::jsonb, 'rh', 'mv', 'pv', 0)",
+        aid,
+    )
+    await finish_analysis(
+        seeded,
+        aid,
+        status="done",
+        minuta_type=None,
+        report={"content": {"alerts": [{"trecho": f"LOCADOR: {NAME}, CPF {CPF}."}]}},
+    )
+    report = (await seeded.fetchrow("SELECT report::text AS r FROM analyses WHERE id = $1::uuid", aid))["r"]
+    assert [s for s in (NAME, CPF, "99988877766") if s in report] == []
+    assert "[CPF]" in report

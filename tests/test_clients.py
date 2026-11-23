@@ -6,6 +6,7 @@ import respx
 from src.clients.jev import call_jev
 from src.clients.llm import ChatResult, chat_completion
 from src.config import Settings
+from src.ingest.masking import mask_payload, mask_personal_data
 
 
 async def test_call_jev_offline_fallback_returns_deterministic_answers():
@@ -22,7 +23,7 @@ async def test_call_jev_offline_fallback_returns_deterministic_answers():
             "criteria": {"true": "Sim", "false": "Nao"},
         },
     }
-    res = await call_jev({"inicio": "CONTRATO DE LOCAÇÃO RESIDENCIAL"}, questions, settings)
+    res = await call_jev(*mask_payload(({"inicio": "CONTRATO DE LOCAÇÃO RESIDENCIAL"}, questions)), settings)
     assert "answers" in res
     assert res["answers"]["tipo"]["choice"] == "locacao_residencial"
     assert isinstance(res["answers"]["risco"]["noul"], float)
@@ -49,19 +50,24 @@ async def test_call_jev_retries_on_429_and_parses_response():
         ]
     )
     res = await call_jev(
-        {"inicio": "Contrato"},
-        {"tipo": {"type": "choice", "instructions": "?", "criteria": {"locacao_residencial": "A"}}},
+        mask_payload({"inicio": "Contrato"}),
+        mask_payload({"tipo": {"type": "choice", "instructions": "?", "criteria": {"locacao_residencial": "A"}}}),
         settings,
     )
-    assert route.call_count == 2
+    # O 429 nao vira erro: o chamador recebe a resposta da tentativa seguinte.
     assert res["answers"]["tipo"]["choice"] == "locacao_residencial"
     assert res["usage"]["input_tokens"] == 42
+    # O servidor viu a MESMA pergunta na retentativa -- e so ela: um terceiro
+    # pedido esgotaria o script do mock e derrubaria o teste.
+    pedidos = [c.request for c in route.calls]
+    assert len(pedidos) == 2
+    assert pedidos[0].content == pedidos[1].content
 
 
 @respx.mock
 async def test_chat_completion_sends_limits_and_data_policy_and_parses_cost():
     offline_settings = Settings(OPENROUTER_API_KEY="")
-    res = await chat_completion("sys", "Pergunta: qual o prazo?", offline_settings)
+    res = await chat_completion("sys", mask_personal_data("Pergunta: qual o prazo?"), offline_settings)
     assert isinstance(res, ChatResult)
     assert isinstance(res.text, str) and len(res.text) > 0
     assert (res.tokens, res.cost_usd) == (0, 0.0)  # offline nao gasta nada
@@ -81,7 +87,7 @@ async def test_chat_completion_sends_limits_and_data_policy_and_parses_cost():
             },
         )
     )
-    r = await chat_completion("sys", "user", online_settings)
+    r = await chat_completion("sys", mask_personal_data("user"), online_settings)
     assert (r.text, r.tokens, r.cost_usd) == ('{"alertas": []}', 55, 0.0123)
 
     payload = json.loads(route.calls.last.request.content)
@@ -90,7 +96,7 @@ async def test_chat_completion_sends_limits_and_data_policy_and_parses_cost():
     assert payload["max_tokens"] == 1500  # default: CHAT_MAX_TOKENS, sem max_tokens explicito
     assert "response_format" not in payload
 
-    await chat_completion("sys", "user", online_settings, json_output=True)
+    await chat_completion("sys", mask_personal_data("user"), online_settings, json_output=True)
     payload = json.loads(route.calls.last.request.content)
     assert payload["response_format"] == {"type": "json_object"}
     assert payload["provider"]["require_parameters"] is True  # so provedores que aceitam JSON mode
@@ -99,7 +105,7 @@ async def test_chat_completion_sends_limits_and_data_policy_and_parses_cost():
 async def test_chat_completion_offline_alertas_parses_risks_and_clause():
     settings = Settings(OPENROUTER_API_KEY="")
     user = "Riscos:\n- R-01: Reajuste semestral\n- R-02: Multa abusiva\n<clausula>Cláusula 2ª - reajuste.</clausula>"
-    res = await chat_completion('responda JSON "alertas"', user, settings)
+    res = await chat_completion('responda JSON "alertas"', mask_personal_data(user), settings)
     data = json.loads(res.text)
     assert (res.tokens, res.cost_usd) == (0, 0.0)
     assert [a["id"] for a in data["alertas"]] == ["R-01", "R-02"]
@@ -111,5 +117,5 @@ async def test_chat_completion_offline_alertas_parses_risks_and_clause():
 async def test_call_jev_offline_non_locacao_is_nao_suportado():
     settings = Settings(TYPESAFE_API_KEY="")
     q = {"tipo": {"type": "choice", "instructions": "?", "criteria": {"locacao_residencial": "A", "nao_suportado": "B"}}}
-    res = await call_jev({"inicio": "ATA DE ASSEMBLEIA"}, q, settings)
+    res = await call_jev(*mask_payload(({"inicio": "ATA DE ASSEMBLEIA"}, q)), settings)
     assert res["answers"]["tipo"]["choice"] == "nao_suportado"

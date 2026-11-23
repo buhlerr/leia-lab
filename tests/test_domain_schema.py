@@ -170,6 +170,50 @@ async def test_analysis_result_columns_stay_writable(dpool):
     assert await dpool.fetchval("SELECT status FROM analyses") == "done"
 
 
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "UPDATE analyses SET status = 'running', finished_at = NULL",
+        "UPDATE analyses SET status = 'failed'",
+        "UPDATE analyses SET report = '{}'::jsonb",
+    ],
+)
+async def test_a_finished_analysis_is_frozen(dpool, sql):
+    aid = await _insert_analysis(dpool)
+    await dpool.execute("UPDATE analyses SET status = 'done', finished_at = now() WHERE id = $1::uuid", aid)
+    with pytest.raises(asyncpg.InsufficientPrivilegeError, match="finished"):
+        await dpool.execute(sql)
+    assert await dpool.fetchval("SELECT status FROM analyses") == "done"
+
+
+async def test_analysis_status_outside_the_lifecycle_is_rejected(dpool):
+    await _insert_analysis(dpool)
+    with pytest.raises(asyncpg.CheckViolationError):
+        await dpool.execute("UPDATE analyses SET status = 'finished'")
+
+
+async def test_init_adds_the_status_check_to_an_existing_database(dpool):
+    await dpool.execute("ALTER TABLE analyses DROP CONSTRAINT analyses_status_check")  # banco anterior ao CHECK
+    await _insert_analysis(dpool)
+    await init_db(dpool)
+    with pytest.raises(asyncpg.CheckViolationError):
+        await dpool.execute("UPDATE analyses SET status = 'finished'")
+
+
+async def test_init_normalizes_a_legacy_status_outside_the_lifecycle(dpool):
+    """Banco anterior ao CHECK com status fora do ciclo: init normaliza e recria o CHECK, sem abortar."""
+    await dpool.execute("ALTER TABLE analyses DROP CONSTRAINT analyses_status_check")  # banco anterior ao CHECK
+    aid = await _insert_analysis(dpool)
+    await dpool.execute("UPDATE analyses SET status = 'finished' WHERE id = $1::uuid", aid)  # so sem o CHECK
+    await init_db(dpool)
+    row = await dpool.fetchrow("SELECT status, report FROM analyses WHERE id = $1::uuid", aid)
+    assert row["status"] == "failed"
+    assert json.loads(row["report"])["status_original"] == "finished"
+    fresh = await _insert_analysis(dpool)  # linha running: o gatilho deixa passar, o CHECK nao
+    with pytest.raises(asyncpg.CheckViolationError):  # e o CHECK voltou a valer
+        await dpool.execute("UPDATE analyses SET status = 'finished' WHERE id = $1::uuid", fresh)
+
+
 # ---------------------------------------------------------------- papeis
 
 

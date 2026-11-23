@@ -15,6 +15,7 @@ from typing import NamedTuple
 import httpx
 
 from src.config import Settings
+from src.ingest.masking import MaskedText, requires_masked
 
 logger = logging.getLogger(__name__)
 
@@ -82,12 +83,13 @@ def _deterministic_embedding(text: str, dim: int = EMBEDDING_DIM) -> list[float]
     return [value / norm for value in vector]
 
 
-async def get_embedding(text: str, settings: Settings | None = None) -> list[float]:
+async def get_embedding(text: MaskedText, settings: Settings | None = None) -> list[float]:
     """Return only the vector of :func:`embed_text` (use that when you store or search it)."""
     return (await embed_text(text, settings)).vector
 
 
-async def embed_text(text: str, settings: Settings | None = None) -> EmbeddingResult:
+@requires_masked("text")
+async def embed_text(text: MaskedText, settings: Settings | None = None) -> EmbeddingResult:
     """Return a 1536-dimension embedding for ``text`` plus the model that made it.
 
     Falls back to :func:`_deterministic_embedding` when ``settings`` has no

@@ -10,6 +10,7 @@ import pypdf
 import pytest
 
 from src.ingest.extract import (
+    DocumentError,
     DocumentTooLargeError,
     EmptyDocumentError,
     InvalidDocumentError,
@@ -134,3 +135,19 @@ def test_extract_rejects_pdf_above_the_page_limit(monkeypatch: pytest.MonkeyPatc
 
     with pytest.raises(DocumentTooLargeError):
         extract_text("minuta.pdf", buffer.getvalue())
+
+
+def test_a_document_error_cannot_exist_without_its_http_contract():
+    with pytest.raises(TypeError, match="http_status"):
+
+        class SemContrato(DocumentError):
+            pass
+
+
+def test_two_document_errors_cannot_share_a_code():
+    with pytest.raises(TypeError, match="invalid_document"):
+
+        class OutroInvalido(DocumentError):
+            http_status = 422
+            code = "invalid_document"
+            public_message = "Outra mensagem."

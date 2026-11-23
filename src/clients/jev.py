@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 
 from src.config import Settings
+from src.ingest.masking import requires_masked
 from src.tracing import client_span, tag_span
 
 _RETRY_STATUS = {429, 529}
@@ -36,6 +37,7 @@ def _offline_answer(q: dict[str, Any], state_text: str) -> dict[str, Any]:
     return {"choice": choice, "confidence": 0.95, "probabilities": {choice: 0.95}}
 
 
+@requires_masked("state", "questions")
 @client_span("call_jev", allowed=("state", "questions"))
 async def call_jev(
     state: dict[str, Any],

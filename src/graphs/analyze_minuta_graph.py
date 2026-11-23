@@ -6,8 +6,14 @@ Texto de minuta nunca entra em logs nem em mensagens de excecao.
 
 Privacidade: o grafo NUNCA ve texto cru. ``prepare_input`` (usado por ``analyze``/``analyze_stream``)
 le e mascara FORA do grafo, entao nenhum checkpointer, stream ou rastreador recebe o texto original.
-O estado nao tem ``raw_text`` nem ``file_path``, e ``iniciar`` recusa texto que nao esteja mascarado.
+O estado nao tem ``raw_text`` nem ``file_path``, e ``iniciar`` recusa qualquer texto que nao seja
+``MaskedText``. Payloads montados no grafo passam por ``mask_payload`` antes de cada chamada externa.
 Quem envolver o grafo (rastreio, API) tem de chamar ``analyze()``, nunca ``graph.ainvoke`` com texto cru.
+
+Ciclo de vida: ``analyze``/``analyze_stream`` sao os donos da linha de ``analyses``. Criam o
+``analysis_id`` antes de o grafo rodar, ``iniciar`` insere a linha com ele, e qualquer interrupcao
+(excecao ou cancelamento, em qualquer ponto) termina a linha como 'failed' com so o TIPO do erro.
+Modelo verificado: ``.claude/skills/verify-analysis-lifecycle``.
 
 Regras: tipos, temas, matriz de riscos e prompts NAO sao argumentos nem constantes. ``iniciar`` le uma
 foto atomica das tabelas de dominio (``load_rules_snapshot``) e grava a analise com ela; o resto do
@@ -19,9 +25,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
+import uuid
 import weakref
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from functools import wraps
 from pathlib import Path
@@ -33,7 +42,7 @@ from langgraph.graph import END, START, StateGraph
 from src.clients.jev import call_jev
 from src.clients.llm import ChatResult, chat_completion
 from src.config import Settings
-from src.db.analyses import append_trail, finish_analysis, start_analysis
+from src.db.analyses import append_trail, fail_analysis, finish_analysis, start_analysis
 from src.db.rules import load_rules_snapshot
 from src.graphs.ingest_graph import _read_path
 from src.graphs.minuta_rules import (
@@ -41,14 +50,14 @@ from src.graphs.minuta_rules import (
     segment_clauses,
     validate_and_format,
 )
-from src.ingest.masking import mask_personal_data, resolve_doc_alias
+from src.ingest.masking import MaskedText, mask_payload, mask_personal_data, require_masked, resolve_doc_alias
 from src.rag.embeddings import EmbeddingResult, embed_text
 from src.rag.hybrid_search import hybrid_search_rrf
 from src.tracing import tag_analysis
 
 _EMPTY_TEXT_MSG = "text must be a non-empty string"
-_UNMASKED_MSG = "graph input needs masked 'text'; use analyze()/prepare_input() (raw text never enters the graph)"
-_CONCURRENCY = 8  # teto global de chamadas externas (Jev, LLM, embeddings) por loop
+_NO_ANALYSIS_ID_MSG = "graph input needs an 'analysis_id'; use analyze(), which owns the analyses row"
+_CONCURRENCY = 8  # teto PADRAO de chamadas externas (Jev, LLM, embeddings); o knob publico e max_concurrency
 _EXCERPT = 200  # caracteres do texto MASCARADO da clausula guardados na trilha
 
 
@@ -86,8 +95,8 @@ _NC = {"nao_consta": "O contrato nao informa isso, ou nenhuma opcao corresponde.
 
 class AnalyzeMinutaState(TypedDict, total=False):
     # Sem raw_text / file_path / doc_name, de proposito (ver docstring do modulo).
-    filename: str  # apelido publico (documento-<sha8>.<ext>), nunca o nome real
-    text: str  # texto MASCARADO
+    filename: MaskedText  # apelido publico (documento-<sha8>.<ext>), nunca o nome real
+    text: MaskedText
     analysis_id: str
     rules: dict[str, Any]  # conteudo da foto das regras (sem dado pessoal)
     rules_meta: dict[str, Any]  # hash, matrix_version, prompt_version, history_id
@@ -137,7 +146,7 @@ def _type_rules(state: AnalyzeMinutaState) -> dict[str, Any]:
 # ---------------------------------------------------------------- entrada (fora do grafo)
 async def prepare_input(
     *, raw_text: str | None = None, file_path: str | Path | None = None, filename: str = "", doc_name: str = ""
-) -> dict[str, str]:
+) -> dict[str, MaskedText]:
     """Le e mascara localmente. O dict devolvido e a UNICA coisa que entra no grafo."""
     text = raw_text
     if text is None and file_path is not None:
@@ -157,18 +166,84 @@ def _run_config(config: dict[str, Any] | None, inp: dict[str, str]) -> dict[str,
     return cfg
 
 
-async def analyze(graph: Any, *, config: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+@dataclass(frozen=True)
+class AnalyzeMinutaGraph:
+    """O grafo compilado e o pool em que ele grava: ``analyze`` precisa dos dois para terminar a linha.
+
+    ``ainvoke``/``astream`` delegam ao grafo compilado para provas e depuracao (privacy_probe);
+    a producao continua chamando ``analyze()``/``analyze_stream()``, donos da linha de ``analyses``.
+    """
+
+    compiled: Any
+    pool: asyncpg.Pool
+
+    async def ainvoke(self, *args: Any, **kwargs: Any) -> Any:
+        return await self.compiled.ainvoke(*args, **kwargs)
+
+    def astream(self, *args: Any, **kwargs: Any) -> Any:
+        return self.compiled.astream(*args, **kwargs)
+
+
+logger = logging.getLogger(__name__)
+
+_FAILURE_WRITE_TIMEOUT = 10.0  # s: banco travado nao pode segurar o cancelamento para sempre
+
+
+@asynccontextmanager
+async def _owned_analysis(pool: asyncpg.Pool, inp: dict[str, str]) -> AsyncIterator[None]:
+    """Da a ``inp`` um ``analysis_id`` novo; se a execucao parar antes do fim, a linha termina 'failed'.
+
+    ``BaseException`` inclui o cancelamento (cliente que desconecta, timeout) e o ``GeneratorExit``
+    (quem consome ``analyze_stream`` parou cedo). A escrita de falha e ``shield`` contra o PRIMEIRO
+    cancelamento; um segundo durante ela e ADIADO ate a linha virar 'failed' -- ``analyze()`` nunca
+    termina antes da escrita. Banco que nao responde em ``_FAILURE_WRITE_TIMEOUT`` solta o pedido:
+    a linha pode ficar 'running' (visivel no banco) e o aviso vai ao log.
+    """
+    inp["analysis_id"] = str(uuid.uuid4())
+    try:
+        yield
+    except BaseException as e:
+        write = asyncio.ensure_future(
+            asyncio.wait_for(fail_analysis(pool, inp["analysis_id"], e), _FAILURE_WRITE_TIMEOUT)
+        )
+        try:
+            await asyncio.shield(write)
+        except asyncio.CancelledError:
+            while not write.done():  # 2o..enesimo cancelamento: absorve ate a escrita terminar
+                try:
+                    await asyncio.shield(write)
+                except asyncio.CancelledError:
+                    pass
+        except asyncio.TimeoutError:
+            logger.warning(
+                "analysis %s: a escrita de falha nao terminou em %.0fs; a linha pode seguir 'running'",
+                inp["analysis_id"],
+                _FAILURE_WRITE_TIMEOUT,
+            )
+        raise
+
+
+async def analyze(graph: AnalyzeMinutaGraph, *, config: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
     """``prepare_input`` + execucao do grafo; devolve o estado final."""
     inp = await prepare_input(**kwargs)
-    return await graph.ainvoke(inp, _run_config(config, inp))
+    async with _owned_analysis(graph.pool, inp):
+        return await graph.compiled.ainvoke(inp, _run_config(config, inp))
 
 
 async def analyze_stream(
-    graph: Any, *, config: dict[str, Any] | None = None, stream_mode: str = "updates", **kwargs: Any
+    graph: AnalyzeMinutaGraph, *, config: dict[str, Any] | None = None, stream_mode: str = "updates", **kwargs: Any
 ) -> AsyncIterator[Any]:
+    """Stream dos updates do grafo; a linha e do mesmo ``_owned_analysis`` de ``analyze()``.
+
+    Contrato de quem consome: parar antes do fim exige fechar o iterador (``contextlib.aclosing``)
+    AINDA COM O POLO VIVO -- o ``GeneratorExit`` da execucao do consumidor termina a linha como
+    'failed'. Iterador abandonado sem fechamento so termina no shutdown_asyncgens do loop, e a
+    escrita falha se o pool ja fechou antes dele.
+    """
     inp = await prepare_input(**kwargs)
-    async for chunk in graph.astream(inp, _run_config(config, inp), stream_mode=stream_mode):
-        yield chunk
+    async with _owned_analysis(graph.pool, inp):
+        async for chunk in graph.compiled.astream(inp, _run_config(config, inp), stream_mode=stream_mode):
+            yield chunk
 
 
 def build_analyze_minuta_graph(
@@ -180,11 +255,14 @@ def build_analyze_minuta_graph(
     confirm_cutoff: float = 0.5,
     norm_cutoff: float = 0.3,
     max_clauses: int = 45,
+    max_concurrency: int = _CONCURRENCY,
     checkpointer: Any = None,
-) -> Any:
+) -> AnalyzeMinutaGraph:
     """Compila o grafo de analise de minuta (roteamento condicional pos-classificacao).
 
     Regras nao sao argumentos: sao lidas do banco no inicio de cada analise (no ``iniciar``).
+    ``checkpointer`` e ferramenta de depuracao: retomar um ponto de controle invoca o grafo
+    sem ``analyze()`` e NAO termina a linha -- producao nao compila com checkpointer.
     """
     cfg = settings or Settings()
     params = {
@@ -195,20 +273,23 @@ def build_analyze_minuta_graph(
         "max_clauses": max_clauses,
         "max_cost_usd": cfg.ANALYSIS_MAX_COST_USD,
     }
-    limiters: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = weakref.WeakKeyDictionary()
+    limiters: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[int, asyncio.Semaphore]] = (
+        weakref.WeakKeyDictionary()
+    )
 
     def _limiter() -> asyncio.Semaphore:
-        # Um semaforo por event loop (Semaphore nao atravessa loops), compartilhado por todo o grafo.
+        # Um semaforo por (event loop, teto): Semaphore nao atravessa loops, e cada grafo
+        # traz seu proprio teto publico (max_concurrency).
         loop = asyncio.get_running_loop()
-        return limiters.setdefault(loop, asyncio.Semaphore(_CONCURRENCY))
+        return limiters.setdefault(loop, {}).setdefault(max_concurrency, asyncio.Semaphore(max_concurrency))
 
     async def jev(state: dict[str, Any], questions: dict[str, Any]) -> dict[str, Any]:
         async with _limiter():
-            return await call_jev(state, questions, cfg)
+            return await call_jev(mask_payload(state), mask_payload(questions), cfg)
 
     async def embed(text: str) -> EmbeddingResult:
         async with _limiter():
-            return await embed_text(text, cfg)
+            return await embed_text(mask_personal_data(text), cfg)
 
     async def llm(system: str, user: str, budget: CostBudget, model: str | None = None) -> ChatResult:
         use = cfg.model_copy(update={"CHAT_MODEL": model}) if model else cfg
@@ -216,62 +297,35 @@ def build_analyze_minuta_graph(
         async with _limiter():
             if budget.exhausted:
                 raise BudgetExhausted
-            r = await chat_completion(system, user, use, temperature=0.1, json_output=True)
+            r = await chat_completion(system, mask_personal_data(user), use, temperature=0.1, json_output=True)
             budget.charge(r.cost_usd)
             return r
 
     async def rec(state: AnalyzeMinutaState, steps: list[dict[str, Any]]) -> None:
         await append_trail(pool, state["analysis_id"], state["rules_meta"], steps)
 
-    def guarded(fn: Any) -> Any:
-        """Se um no falha, a analise fica 'failed' com o TIPO do erro (nunca a mensagem: pode ter texto)."""
-
-        @wraps(fn)
-        async def inner(state: AnalyzeMinutaState) -> dict[str, Any]:
-            try:
-                return await fn(state)
-            except Exception as e:
-                if state.get("analysis_id"):
-                    await finish_analysis(
-                        pool,
-                        state["analysis_id"],
-                        status="failed",
-                        minuta_type=state.get("tipo"),
-                        report={"error": type(e).__name__, "step": fn.__name__},
-                    )
-                raise
-
-        return inner
-
     async def iniciar(state: AnalyzeMinutaState) -> dict[str, Any]:
-        text = state.get("text")
-        # Mascarar e idempotente: texto que muda ao ser mascarado de novo nao passou por prepare_input.
-        if not isinstance(text, str) or not text.strip() or mask_personal_data(text) != text:
-            raise ValueError(_UNMASKED_MSG)
+        # Todo texto que entra no grafo veio de prepare_input: raw_text, file_path ou str comum param aqui.
+        require_masked(
+            {"text": "", **{k: v for k, v in state.items() if k != "analysis_id"}}, what="analyze graph input"
+        )
+        # Sem analysis_id a execucao nao veio de analyze(), e ninguem terminaria a linha se ela parasse.
+        aid = state.get("analysis_id")
+        if not aid:
+            raise ValueError(_NO_ANALYSIS_ID_MSG)
+        text = state["text"]
         alias = state.get("filename", "")
         # Falha alto aqui (RulesConfigError), antes de qualquer chamada externa, se faltar regra.
         snap = await load_rules_snapshot(pool)
-        aid = await start_analysis(pool, snap, filename_alias=alias, masked_text=text, params=params)
-        tag_analysis(str(aid))  # amarra o traco (LangSmith/MLflow) a esta analise; no-op sem rastreio
+        await start_analysis(pool, snap, analysis_id=aid, filename_alias=alias, masked_text=text, params=params)
+        tag_analysis(aid)  # amarra o traco (LangSmith/MLflow) a esta analise; no-op sem rastreio
         meta = {
             "hash": snap.hash,
             "matrix_version": snap.matrix_version,
             "prompt_version": snap.prompt_version,
             "history_id": snap.history_id,
         }
-        await append_trail(
-            pool,
-            aid,
-            meta,
-            [
-                {
-                    "step": "iniciar",
-                    "input_summary": {"filename_alias": alias, "masked_chars": len(text)},
-                    "decision": {"rules_hash": snap.hash, "domain_history_id": snap.history_id, "params": params},
-                }
-            ],
-        )
-        return {"analysis_id": str(aid), "rules": snap.content, "rules_meta": meta}
+        return {"rules": snap.content, "rules_meta": meta}
 
     async def classificar(state: AnalyzeMinutaState) -> dict[str, Any]:
         types = state["rules"]["types"]
@@ -642,7 +696,7 @@ def build_analyze_minuta_graph(
         ("analisar", analisar),
         ("validar", validar),
     ]:
-        builder.add_node(name, guarded(fn))
+        builder.add_node(name, fn)
     builder.add_edge(START, "iniciar")
     builder.add_edge("iniciar", "classificar")
     builder.add_conditional_edges("classificar", route_after_classificar, {"ficha": "ficha", "validar": "validar"})
@@ -651,4 +705,4 @@ def build_analyze_minuta_graph(
     builder.add_edge("buscar", "analisar")
     builder.add_edge("analisar", "validar")
     builder.add_edge("validar", END)
-    return builder.compile(checkpointer=checkpointer)
+    return AnalyzeMinutaGraph(compiled=builder.compile(checkpointer=checkpointer), pool=pool)

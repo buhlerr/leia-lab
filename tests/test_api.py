@@ -6,6 +6,7 @@ offline de Jev/LLM/embeddings), sem tocar o banco de desenvolvimento.
 
 from __future__ import annotations
 
+import asyncio
 import io
 import uuid
 from contextlib import asynccontextmanager
@@ -15,7 +16,7 @@ import docx
 import httpx
 import pytest
 
-from src.api.app import create_app
+from src.api.app import ClientDisconnected, create_app, run_disconnect_guarded
 from src.config import Settings
 from src.db.connection import init_db
 from src.graphs.ingest_graph import build_ingest_graph
@@ -130,8 +131,22 @@ async def test_post_txt_returns_201_and_get_returns_the_same_contract(pool, api_
         assert body["minuta_type"] == "locacao_residencial"
         assert body["filename_alias"].startswith("documento-") and body["filename_alias"].endswith(".txt")
         assert body["matrix_version"] and body["prompt_version"] and body["rules_hash"]
-        assert body["report"]["content"]["alerts"]
-        assert [s["step"] for s in body["trail"]][0] == "iniciar"
+        # Contrato exato, derivado da minuta e das regras semeadas: duas clausulas,
+        # ambas confirmam REAJ-01 (vermelho) com o fundamento da matriz.
+        alerts = body["report"]["content"]["alerts"]
+        assert [(a["risk_id"], a["severity"], a["clause_index"]) for a in alerts] == [
+            ("REAJ-01", "red", 1),
+            ("REAJ-01", "red", 2),
+        ]
+        assert alerts[0]["legal_basis"] == ["Lei 10.192/2001, art. 2º"]
+        # Contrato da trilha: ordenada, comeca em iniciar, termina em validar, e cada
+        # clausula tem seus passos triar e buscar. Passos intermediarios do grafo nao
+        # sao contrato da API: um passo novo nao pode quebrar este teste.
+        steps = [(s["step"], s["clause_n"]) for s in body["trail"]]
+        assert steps[0] == ("iniciar", None)
+        assert steps[-1] == ("validar", None)
+        assert [n for s, n in steps if s == "triar"] == [1, 2]
+        assert [n for s, n in steps if s == "buscar"] == [1, 2]
         aid = uuid.UUID(body["analysis_id"])  # contrato: e um UUID valido
 
         got = await client.get(f"/v1/analyses/{body['analysis_id']}", headers=_auth())
@@ -170,7 +185,18 @@ async def test_post_docx_returns_201_with_trail(pool, api_settings) -> None:
         assert r.status_code == 201, r.text
         body = r.json()
         assert body["status"] == "done"
-        assert body["trail"]
+        # Mesmo contrato exato da outra via de upload: REAJ-01 em cada clausula e a
+        # trilha ordenada nos extremos, com cada clausula coberta (sem pinar os
+        # passos intermediarios do grafo).
+        assert [(a["risk_id"], a["severity"], a["clause_index"]) for a in body["report"]["content"]["alerts"]] == [
+            ("REAJ-01", "red", 1),
+            ("REAJ-01", "red", 2),
+        ]
+        steps = [(s["step"], s["clause_n"]) for s in body["trail"]]
+        assert steps[0] == ("iniciar", None)
+        assert steps[-1] == ("validar", None)
+        assert [n for s, n in steps if s == "triar"] == [1, 2]
+        assert [n for s, n in steps if s == "buscar"] == [1, 2]
         assert body["filename_alias"].startswith("documento-") and body["filename_alias"].endswith(".docx")
         assert "Vanderlei" not in r.text
 
@@ -185,6 +211,25 @@ async def test_post_exe_returns_415(pool, api_settings) -> None:
         assert r.status_code == 415
         assert r.json()["code"] == "unsupported_file"
         assert "Joao" not in r.text  # mensagem generica: sem eco do nome real
+
+
+async def test_post_docx_lento_returns_422_document_timeout(pool, api_settings, monkeypatch) -> None:
+    """O timeout de leitura chega ao cliente com o contrato proprio (422/document_timeout),
+    nao o de arquivo grande demais -- a confusao que o leia-lab-cxe.5 corrigiu."""
+    from src.ingest.extract import DocumentTimeoutError
+
+    def lento(extension: str, data: bytes, **kwargs: object) -> str:
+        raise DocumentTimeoutError("leitura lenta")
+
+    monkeypatch.setattr("src.api.service.extract_text_isolated", lento)
+    async with api_client(api_settings) as client:
+        r = await client.post(
+            "/v1/analyses",
+            files={"file": ("Contrato.docx", _docx_bytes(_MINUTA), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
+            headers=_auth(),
+        )
+    assert r.status_code == 422
+    assert r.json() == {"code": "document_timeout", "message": "O documento demorou demais para ser lido."}
 
 
 async def test_post_oversized_returns_413(pool, api_settings) -> None:
@@ -278,3 +323,49 @@ async def test_api_sobe_e_analisa_com_o_mlflow_fora_do_ar(pool, api_settings) ->
             headers=_auth(),
         )
         assert r.status_code == 201, r.text
+
+
+# ---------------------------------------------------------------- desconexao do cliente
+
+
+class _FakeRequest:
+    """Request de mentira: desconecta (True) na n-esima sonda."""
+
+    def __init__(self, on_probe: int = 1) -> None:
+        self._on_probe = on_probe
+        self.probes = 0
+
+    async def is_disconnected(self) -> bool:
+        self.probes += 1
+        return self.probes >= self._on_probe
+
+
+async def test_desconexao_cancela_o_trabalho_em_andamento() -> None:
+    """Cliente que vai embora: a analise e cancelada (a linha vira 'failed' pelo dono do ciclo)."""
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def hang() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    with pytest.raises(ClientDisconnected):
+        await run_disconnect_guarded(hang(), _FakeRequest(on_probe=1))
+    assert started.is_set() and cancelled.is_set()
+
+
+async def test_cliente_presente_deixa_o_trabalho_terminar() -> None:
+    """Sem desconexao, o guardiao nao interfere: o resultado do trabalho volta inteiro."""
+
+    async def work() -> str:
+        return "resultado"
+
+    class Never(_FakeRequest):
+        async def is_disconnected(self) -> bool:
+            return False
+
+    assert await run_disconnect_guarded(work(), Never()) == "resultado"

@@ -179,13 +179,36 @@ CREATE TABLE IF NOT EXISTS analyses (
     started_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     finished_at TIMESTAMPTZ
 );
+-- Ciclo de vida: running -> done | unsupported | failed. Status fora do ciclo em banco legado e
+-- normalizado para 'failed' (valor original no report) ANTES do CHECK; o CHECK em si so e criado
+-- se ainda nao existe -- sem o DROP+ADD de antes, que revalidava e trancava a tabela a cada init.
+UPDATE analyses SET status = 'failed',
+                    report = jsonb_build_object('error', 'StatusForaDoCiclo', 'status_original', status),
+                    finished_at = now()
+WHERE status NOT IN ('running', 'done', 'unsupported', 'failed');
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'analyses_status_check' AND conrelid = 'analyses'::regclass
+    ) THEN
+        ALTER TABLE analyses ADD CONSTRAINT analyses_status_check
+            CHECK (status IN ('running', 'done', 'unsupported', 'failed'));
+    END IF;
+END $$;
 
--- So status/minuta_type/report/finished_at mudam; o snapshot e congelado.
+-- So status/minuta_type/report/finished_at mudam, e so enquanto 'running'; o snapshot e congelado.
 CREATE OR REPLACE FUNCTION analyses_guard() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
     IF TG_OP = 'DELETE' THEN
         RAISE EXCEPTION 'DELETE on analyses is not allowed' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    IF OLD.status NOT IN ('running', 'done', 'unsupported', 'failed') AND NEW.status = 'failed' THEN
+        RETURN NEW;  -- linha anterior ao CHECK: so a normalizacao para 'failed' passa
+    END IF;
+    IF OLD.status <> 'running' THEN
+        RAISE EXCEPTION 'analysis % is finished (%): its row is immutable', OLD.id, OLD.status
+            USING ERRCODE = 'insufficient_privilege';
     END IF;
     IF (OLD.id, OLD.filename_alias, OLD.text_sha256, OLD.params, OLD.rules_snapshot, OLD.rules_hash,
         OLD.matrix_version, OLD.prompt_version, OLD.domain_history_id, OLD.started_at)

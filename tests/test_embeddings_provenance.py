@@ -7,6 +7,7 @@ from httpx import Response
 
 from src.config import Settings
 from src.db.connection import init_db
+from src.ingest.masking import mask_personal_data as masked
 from src.rag import embeddings
 from src.rag.embeddings import (
     EMBEDDING_DIM,
@@ -33,10 +34,10 @@ def test_offline_model_label_is_distinct_from_configured_model():
 
 
 async def test_embed_text_reports_effective_model_offline():
-    result = await embed_text("clausula", OFFLINE)
+    result = await embed_text(masked("clausula"), OFFLINE)
     assert result.model == OFFLINE_EMBEDDING_MODEL
     assert len(result.vector) == EMBEDDING_DIM
-    assert await get_embedding("clausula", OFFLINE) == result.vector
+    assert await get_embedding(masked("clausula"), OFFLINE) == result.vector
 
 
 @respx.mock
@@ -44,15 +45,15 @@ async def test_embed_text_reports_configured_model_online():
     route = respx.post("https://openrouter.ai/api/v1/embeddings").mock(
         return_value=Response(200, json={"data": [{"embedding": [0.1] * EMBEDDING_DIM}]})
     )
-    result = await embed_text("clausula", ONLINE)
+    result = await embed_text(masked("clausula"), ONLINE)
     assert result.model == ONLINE.EMBEDDING_MODEL
     assert json.loads(route.calls.last.request.content)["provider"] == {"data_collection": "deny"}
 
 
 async def test_offline_fallback_warns_once_per_process(caplog):
     with caplog.at_level(logging.WARNING, logger="src.rag.embeddings"):
-        await embed_text("a", OFFLINE)
-        await embed_text("b", OFFLINE)
+        await embed_text(masked("a"), OFFLINE)
+        await embed_text(masked("b"), OFFLINE)
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1
     assert OFFLINE_EMBEDDING_MODEL in warnings[0].getMessage()
@@ -62,7 +63,7 @@ async def test_dense_search_never_compares_offline_and_real_vectors(pool):
     await init_db(pool)
     doc_id = await pool.fetchval("INSERT INTO kb_docs (title) VALUES ('d') RETURNING id")
     text = "prazo da locacao"
-    offline_vec = (await embed_text(text, OFFLINE)).vector
+    offline_vec = (await embed_text(masked(text), OFFLINE)).vector
     real_vec = [1.0] + [0.0] * (EMBEDDING_DIM - 1)
     for i, (content, vec, model) in enumerate(
         [
@@ -86,7 +87,7 @@ async def test_dense_search_never_compares_offline_and_real_vectors(pool):
 async def test_dense_search_excludes_chunks_with_unknown_model(pool):
     await init_db(pool)
     doc_id = await pool.fetchval("INSERT INTO kb_docs (title) VALUES ('d') RETURNING id")
-    vec = (await embed_text("prazo", OFFLINE)).vector
+    vec = (await embed_text(masked("prazo"), OFFLINE)).vector
     await pool.execute(
         "INSERT INTO kb_chunks (doc_id, content, sequence_order, embedding, embedding_model) "
         "VALUES ($1, 'legacy', 0, $2::vector, NULL)",

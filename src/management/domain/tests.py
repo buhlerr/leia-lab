@@ -17,7 +17,6 @@ from uuid import uuid4
 
 import httpx
 from django import forms
-from django.contrib.admin.sites import site
 from django.contrib.auth.models import Group, User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
@@ -283,17 +282,48 @@ class AdminSmokeTests(SchemaMixin, TestCase):
 
     def test_admin_exibe_todas_as_tabelas(self):
         self.client.force_login(self.admin)
+        indice = self.client.get(reverse("admin:index")).content.decode()
         for model in ALL_MODELS:
             url = reverse(f"admin:domain_{model._meta.model_name}_changelist")
-            self.assertEqual(self.client.get(url).status_code, 200, url)
-            self.assertIn(model, site._registry)
+            self.assertIn(url, indice)  # o indice lista a tabela...
+            self.assertEqual(self.client.get(url).status_code, 200, url)  # ...e a pagina abre
 
     def test_admin_bloqueia_escrita_nos_auditaveis(self):
+        # Nem superuser escreve nas tabelas de auditoria pelo admin: GET E POST do add,
+        # POST de alteracao, POST de exclusao e a exclusao em massa do changelist sao
+        # recusados, e nenhuma linha nasce, muda de lugar ou sai.
+        MinutaType.objects.create(slug="t-audit", name="T", classifier_description="d")
+        historico = DomainHistory.objects.filter(table_name="minuta_types").order_by("-id").first()
+        analise = _analysis()
+        trilha = AnalysisTrail.objects.create(
+            analysis=analise,
+            seq=1,
+            step="iniciar",
+            input_summary={},
+            decision={},
+            matrix_version="v1",
+            prompt_version="p1",
+            recorded_at=timezone.now(),
+        )
+        alvo = {DomainHistory: historico, Analysis: analise, AnalysisTrail: trilha}
+        # Cada tabela auditavel de hoje tem que ter cobertura aqui; uma quarta entra
+        # quebrando este teste ate ganhar linha, POSTs e contagem.
+        self.assertEqual(set(alvo), set(AUDIT_MODELS))
+        antes = {m: m.objects.count() for m in AUDIT_MODELS}
+        self.client.force_login(self.admin)
+        for model, linha in alvo.items():
+            url_add = reverse(f"admin:domain_{model._meta.model_name}_add")
+            self.assertEqual(self.client.get(url_add).status_code, 403, url_add)
+            self.assertEqual(self.client.post(url_add, {}).status_code, 403, url_add)  # criar por POST tambem
+            url_change = reverse(f"admin:domain_{model._meta.model_name}_change", args=[linha.pk])
+            self.assertEqual(self.client.post(url_change, {}).status_code, 403, url_change)
+            url_delete = reverse(f"admin:domain_{model._meta.model_name}_delete", args=[linha.pk])
+            self.assertEqual(self.client.post(url_delete, {"post": "yes"}).status_code, 403, url_delete)
+            url_list = reverse(f"admin:domain_{model._meta.model_name}_changelist")
+            self.client.post(url_list, {"action": "delete_selected", "_selected_action": [linha.pk]})
+            self.assertTrue(model.objects.filter(pk=linha.pk).exists(), model.__name__)
         for model in AUDIT_MODELS:
-            model_admin = site._registry[model]
-            self.assertFalse(model_admin.has_add_permission(None))
-            self.assertFalse(model_admin.has_change_permission(None))
-            self.assertFalse(model_admin.has_delete_permission(None))
+            self.assertEqual(model.objects.count(), antes[model], model.__name__)
 
 
 # ---------------------------------------------------------------- nova analise (pela API)
@@ -439,9 +469,10 @@ class AnalysisDetailTests(SchemaMixin, TestCase):
             correndo = _analysis(status="running", finished_at=None, report=None, minuta_type=None)
             resp = self.client.get(reverse("admin:domain_analysis_change", args=[correndo.id]))
             self.assertEqual(resp.status_code, 200)
-            detalhe = site._registry[Analysis]
-            self.assertEqual(detalhe.duracao(correndo), "-")
-            self.assertEqual(detalhe.alertas(correndo), "nenhum")
+            corpo = resp.content.decode()
+            # Analise em curso: sem duracao (nao terminou) e sem alertas (sem relatorio).
+            self.assertRegex(corpo, r"Duração:</label>\s*<div[^>]*>\s*-\s*</div>")
+            self.assertRegex(corpo, r"Alertas:</label>\s*<div[^>]*>\s*nenhum\s*</div>")
 
 
 # ---------------------------------------------------------------- base normativa
@@ -535,3 +566,18 @@ class RootRedirectTests(SimpleTestCase):
         # O SSO do Pangolin devolve para https://admin.rauvbr.com/; a raiz nao pode dar 404.
         response = self.client.get("/")
         self.assertRedirects(response, "/admin/", fetch_redirect_response=False)
+
+
+class HermeticTests(SimpleTestCase):
+    """O admin sob teste nao herda credencial nem servico real (tests/_hermetic.py)."""
+
+    def test_admin_settings_point_at_no_real_service(self):
+        from django.conf import settings as dj
+        from langsmith.utils import tracing_is_enabled
+
+        from src.config import Settings
+
+        loaded = Settings()
+        self.assertEqual((loaded.OPENROUTER_API_KEY, loaded.TYPESAFE_API_KEY, loaded.MLFLOW_TRACKING_URI), ("", "", ""))
+        self.assertEqual((dj.LEIA_MLFLOW_URL, dj.LEIA_API_TOKEN, dj.LEIA_API_URL), ("", "", "http://leia-api:8080"))
+        self.assertFalse(tracing_is_enabled())

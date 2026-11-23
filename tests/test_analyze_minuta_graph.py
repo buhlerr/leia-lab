@@ -143,26 +143,37 @@ async def test_triage_cutoff_gates_risk_checks(pool, settings, monkeypatch):
     assert out["report_envelope"]["content"]["alerts"] == []
 
 
-async def test_jev_concurrency_is_capped_across_nested_fanouts(pool, settings, monkeypatch):
+async def test_external_call_concurrency_is_capped_across_nested_fanouts(pool, settings, monkeypatch):
+    # O teto e GLOBAL: vale para toda chamada externa do grafo (Jev, LLM e
+    # embeddings), porque fan-outs aninhados multiplicam limites por nivel (bug
+    # c086c93: 64 chamadas simultaneas). O que se observa e o pico de chamadas
+    # em voo na fronteira externa, contra o teto publico do grafo: 8.
     import asyncio
 
     import src.graphs.analyze_minuta_graph as mod
-    from src.clients.jev import call_jev as real
+    from src.clients.jev import call_jev as real_jev
+    from src.clients.llm import chat_completion as real_llm
+    from src.rag.embeddings import embed_text as real_embed
 
     inflight = 0
     peak = 0
 
-    async def spy(state, questions, settings=None):
-        nonlocal inflight, peak
-        inflight += 1
-        peak = max(peak, inflight)
-        await asyncio.sleep(0.005)
-        try:
-            return await real(state, questions, settings)
-        finally:
-            inflight -= 1
+    def tracked(fn):
+        async def spy(*args, **kwargs):
+            nonlocal inflight, peak
+            inflight += 1
+            peak = max(peak, inflight)
+            await asyncio.sleep(0.005)
+            try:
+                return await fn(*args, **kwargs)
+            finally:
+                inflight -= 1
 
-    monkeypatch.setattr(mod, "call_jev", spy)
+        return spy
+
+    monkeypatch.setattr(mod, "call_jev", tracked(real_jev))
+    monkeypatch.setattr(mod, "chat_completion", tracked(real_llm))
+    monkeypatch.setattr(mod, "embed_text", tracked(real_embed))
     await init_db(pool)
     ingest = build_ingest_graph(pool, settings)
     for i in range(6):
@@ -173,10 +184,11 @@ async def test_jev_concurrency_is_capped_across_nested_fanouts(pool, settings, m
         for i in range(1, 13)
     )
     await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
-    graph = mod.build_analyze_minuta_graph(pool, settings)
+    # Teto publico explicito: o teste afirma o knob do grafo, nao a constante privada padrao.
+    graph = mod.build_analyze_minuta_graph(pool, settings, max_concurrency=3)
     await analyze(graph, raw_text="CONTRATO DE LOCAÇÃO RESIDENCIAL\n" + clausulas, filename="m.txt")
 
-    assert 1 < peak <= mod._CONCURRENCY
+    assert 1 < peak <= 3  # nunca mais de 3 chamadas externas simultaneas: o pico medido obedece ao teto pedido
 
 
 async def test_tema_map_ids_resolve_to_citation_without_duplicates_or_empty_norms(pool, settings):
@@ -212,8 +224,6 @@ async def test_cost_budget_caps_redaction_and_reports_it(pool, settings, monkeyp
     import src.graphs.analyze_minuta_graph as mod
     from src.clients.llm import ChatResult
 
-    monkeypatch.setattr(mod, "_CONCURRENCY", 1)  # serializa: a ordem da fila decide quem e redigido
-
     async def fake_chat(system_prompt, user_prompt, s=None, *, temperature=0.1, max_tokens=None, json_output=False):
         await asyncio.sleep(0)  # cede o loop como o HTTP real: pega checagem de teto feita fora do semaforo
         return ChatResult('{"alertas": []}', 30, 0.02 if json_output else 99.0)
@@ -225,7 +235,10 @@ async def test_cost_budget_caps_redaction_and_reports_it(pool, settings, monkeyp
         for i in range(1, 9)
     )
     await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
-    graph = mod.build_analyze_minuta_graph(pool, settings.model_copy(update={"ANALYSIS_MAX_COST_USD": 0.05}))
+    # max_concurrency=1 serializa pelo knob publico: a ordem da fila decide quem e redigido
+    graph = mod.build_analyze_minuta_graph(
+        pool, settings.model_copy(update={"ANALYSIS_MAX_COST_USD": 0.05}), max_concurrency=1
+    )
     out = await analyze(graph, raw_text="CONTRATO DE LOCAÇÃO RESIDENCIAL\n" + clausulas, filename="m.txt")
 
     assert sum(1 for cl in out["clausulas"] if "analise" in cl) == 3
