@@ -113,3 +113,14 @@ def test_name_after_any_party_label_is_masked_everywhere(rotulo):
     assert masked.count("[NOME]") == 2
     assert masked.startswith(f"{rotulo}:")
 
+
+
+@pytest.mark.parametrize("rotulo", ["o LOCADOR", "a Locadora", "a CONTRATANTE", "os LOCADORES"])
+def test_party_label_before_a_qualified_name_does_not_shield_it(rotulo):
+    masked = mask_personal_data(f"{rotulo} Helena Ribeiro Prates, brasileira, casada. Assina Helena Ribeiro Prates.")
+    assert masked == f"{rotulo} [NOME], brasileira, casada. Assina [NOME]."
+
+
+def test_party_labels_alone_are_not_names():
+    raw = "LOCADOR E LOCATÁRIO, brasileiros, ajustam; CONTRATANTE: LOCADORA E LOCATÁRIA Assinam."
+    assert mask_personal_data(raw) == raw
