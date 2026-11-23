@@ -12,6 +12,7 @@ import src.graphs.ingest_graph as ing
 from src.db.connection import init_db
 from src.graphs.analyze_minuta_graph import AnalyzeMinutaState
 from src.graphs.ingest_graph import IngestState, build_ingest_graph, ingest, prepare_ingest_input
+from src.ingest import masking
 
 NAME = "Maria Oliveira Santos"
 CPF = "111.222.333-44"
@@ -60,8 +61,10 @@ async def test_ingest_keeps_no_personal_data_in_state_checkpoint_updates_or_db(p
 
 
 async def test_the_ingest_scan_catches_the_leak_when_masking_is_off(pool, settings, monkeypatch):
-    monkeypatch.setattr(ing, "mask_personal_data", lambda text: text)
-    monkeypatch.setattr(ing, "resolve_doc_alias", lambda filename, doc_name="": filename)
+    # Mascaramento desligado: sem regras, o texto cru sai como MaskedText e o grafo roda ate o fim.
+    monkeypatch.setattr(masking, "_NAME_RULES", [])
+    monkeypatch.setattr(masking, "_RULES", [])
+    monkeypatch.setattr(ing, "resolve_doc_alias", lambda filename, doc_name="": masking._masked(filename))
     leaks = await _leaks(pool, settings)
     for place, found in leaks.items():
         assert NAME in found and CPF in found, place

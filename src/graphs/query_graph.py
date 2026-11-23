@@ -1,6 +1,9 @@
 """Grafo LangGraph equivalente a ``Contratos - Consulta.json``.
 
 ``START -> embed_query -> retrieve_chunks -> parse_chunks -> build_prompt -> generate_answer -> END``.
+
+Privacidade: a pergunta pode trazer nome ou CPF. ``ask`` a mascara FORA do grafo; o grafo nunca ve a
+pergunta crua e ``embed_text`` recusa uma pergunta que nao passou por ``ask``.
 """
 
 from __future__ import annotations
@@ -12,6 +15,7 @@ from langgraph.graph import END, START, StateGraph
 
 from src.clients.llm import chat_completion
 from src.config import Settings
+from src.ingest.masking import MaskedText, mask_personal_data
 from src.rag.embeddings import embed_text
 from src.rag.hybrid_search import hybrid_search_rrf
 
@@ -26,14 +30,19 @@ CONSULTA_PROMPT_TEMPLATE = (
 
 
 class QueryState(TypedDict, total=False):
-    question: str
+    question: MaskedText
     top_k: int
     query_vector: list[float]
     query_model: str
     retrieved_chunks: list[dict[str, Any]]
     parsed_context: str
-    prompt: str
+    prompt: MaskedText
     answer: str
+
+
+async def ask(graph: Any, *, question: str, top_k: int = 4, config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Mascara a pergunta e roda o grafo de consulta; devolve o estado final."""
+    return await graph.ainvoke({"question": mask_personal_data(question), "top_k": top_k}, config)
 
 
 def build_query_graph(pool: asyncpg.Pool, settings: Settings | None = None):
@@ -59,7 +68,8 @@ def build_query_graph(pool: asyncpg.Pool, settings: Settings | None = None):
         prompt = CONSULTA_PROMPT_TEMPLATE.replace("{context}", state["parsed_context"]).replace(
             "{question}", state["question"]
         )
-        return {"prompt": prompt}
+        # O prompt montado e str comum; mascarar de novo o que ja e mascarado nao o altera.
+        return {"prompt": mask_personal_data(prompt)}
 
     async def generate_answer(state: QueryState) -> dict[str, Any]:
         answer, _ = await chat_completion(
