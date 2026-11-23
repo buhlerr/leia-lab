@@ -25,12 +25,12 @@ Production lives in the homelab, container CT 116. Look there, not in a local ch
 | LangSmith (CLI traces, only with `--trace`) | Project `leia-lab` | Owner's account |
 | Production Postgres (`leia_lab`, shared with Directus): `analyses`, `analysis_trail`, matrix | CT 116, container `leia-lab-postgres`, `192.168.0.120:5432` | Through Proxmox `pve` (`192.168.0.9` on the LAN, `100.101.28.59` on Tailscale): `ssh pve "pct exec 116 -- docker exec leia-lab-postgres psql -U leia -d leia_lab"`. Set `default_transaction_read_only=on` before reading |
 | Daily `pg_dump` backups | `/var/backups/leia/` on `pve` | `ssh pve` |
-| Secrets | Shelve, team `vitor`, project `LEIA`. `production` holds the paid OpenRouter and TypeSafe keys; no environment holds `DATABASE_URL` or `LEIA_API_TOKEN` | `shelve run --env <env> -- <cmd>`, on Windows and on the VPS |
+| Secrets | 1Password, vault `DEV`, items tagged `leia-lab` (paid OpenRouter and TypeSafe keys, LangSmith, Linear). `.env.op` holds only `op://` references; nothing holds `DATABASE_URL` or `LEIA_API_TOKEN` | `op run --env-file=.env.op -- <cmd>`, on Windows and on the VPS (ADR-0003) |
 | Test minutas and gold-set texts (`leia-minutas-teste-mascaradas/`) | Windows checkout only (`C:\Users\Vitor\dev\leia-lab`) | Never committed or uploaded |
 
 **Windows** (`C:\Users\Vitor\dev\leia-lab`) is on the home LAN and holds the minutas. Run commands in Git Bash.
 
-**VPS** (`/data/projects/leia-lab`, host `acfs`) reaches the homelab only through Tailscale: `ssh pve` is the `~/.ssh/config` alias (key `~/.ssh/leia_pve`), then `pct exec 116`. The LAN routes `192.168.0.9/32` and `192.168.0.120/32` are advertised by `pve`, but direct LAN IPs work only once they are approved in the Tailscale admin, so use the `ssh pve` path. Shelve is logged in (`~/.config/.shelve`, mode 600). The minutas are absent; ask the user for them. The VPS Postgres on `localhost:5433` holds only test and `leia_lab_verify_*` databases, never production data.
+**VPS** (`/data/projects/leia-lab`, host `acfs`) reaches the homelab only through Tailscale: `ssh pve` is the `~/.ssh/config` alias (key `~/.ssh/leia_pve`), then `pct exec 116`. The LAN routes `192.168.0.9/32` and `192.168.0.120/32` are advertised by `pve`, but direct LAN IPs work only once they are approved in the Tailscale admin, so use the `ssh pve` path. The 1Password CLI `op` is installed in `~/.local/bin` with a read-only service account; run `export OP_SERVICE_ACCOUNT_TOKEN="$(cat ~/.config/op/leia-lab.token)"` before `op run`. The minutas are absent; ask the user for them. The VPS Postgres on `localhost:5433` holds only test and `leia_lab_verify_*` databases, never production data.
 
 ## Build and test
 
@@ -44,7 +44,7 @@ docker compose up -d postgres             # local Postgres 17 + pgvector on 5433
 
 The suite drops and recreates `public` in the test database; `tests/_db_guard.py` refuses any database not ending in `_test`. To prove a change end to end, use the `verify-leia-lab` skill (`.claude/skills/verify-leia-lab/`), not bare `python -m src.cli`: it pins a disposable `leia_lab_verify_<id>` database and blanks paid keys.
 
-Secrets come from Shelve (`shelve run --env production -- <cmd>` in Git Bash). Paid paths (real OpenRouter/TypeSafe keys, `--trace`) spend money; ask first.
+Secrets come from 1Password (`op run --env-file=.env.op -- <cmd>`, in Git Bash on Windows). Never write secret values to disk. Paid paths (real OpenRouter/TypeSafe keys, `--trace`) spend money; ask first.
 
 ## Git
 
@@ -54,6 +54,7 @@ This repository opts in to the **Team-maintainer** profile of the Beads block be
 - Never merge into `master`, push to `master`, or force-push a branch someone else pushed to. The owner reviews and merges every PR.
 - Ask first for anything irreversible or paid: deploys to CT 116, writes to production Postgres, real OpenRouter/TypeSafe keys, `--trace`.
 - A "do not commit" or "do not push" in the current request still wins.
+- At session start (after `bd dolt pull`) and at session close (before `bd dolt push`), sync Beads with Linear (team `VIT`): `op run --env-file=.env.op -- scripts/linear-sync.sh`. It pulls everything from Linear, pushes open beads, and pushes closed beads already in Linear. Never run a bare `bd linear sync`: it would push the closed history.
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:46cd31e7 -->
 ## Beads Issue Tracker
