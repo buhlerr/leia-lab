@@ -130,8 +130,27 @@ async def test_post_txt_returns_201_and_get_returns_the_same_contract(pool, api_
         assert body["minuta_type"] == "locacao_residencial"
         assert body["filename_alias"].startswith("documento-") and body["filename_alias"].endswith(".txt")
         assert body["matrix_version"] and body["prompt_version"] and body["rules_hash"]
-        assert body["report"]["content"]["alerts"]
-        assert [s["step"] for s in body["trail"]][0] == "iniciar"
+        # Contrato exato, derivado da minuta e das regras semeadas: duas clausulas,
+        # ambas confirmam REAJ-01 (vermelho) com o fundamento da matriz.
+        alerts = body["report"]["content"]["alerts"]
+        assert [(a["risk_id"], a["severity"], a["clause_index"]) for a in alerts] == [
+            ("REAJ-01", "red", 1),
+            ("REAJ-01", "red", 2),
+        ]
+        assert alerts[0]["legal_basis"] == ["Lei 10.192/2001, art. 2º"]
+        # A trilha ordenada reconstitui a decisao inteira: cada passo do grafo,
+        # uma linha por clausula em triar e buscar.
+        assert [(s["step"], s["clause_n"]) for s in body["trail"]] == [
+            ("iniciar", None),
+            ("classificar", None),
+            ("ficha", None),
+            ("triar", 1),
+            ("triar", 2),
+            ("buscar", 1),
+            ("buscar", 2),
+            ("analisar", None),
+            ("validar", None),
+        ]
         aid = uuid.UUID(body["analysis_id"])  # contrato: e um UUID valido
 
         got = await client.get(f"/v1/analyses/{body['analysis_id']}", headers=_auth())
@@ -170,7 +189,23 @@ async def test_post_docx_returns_201_with_trail(pool, api_settings) -> None:
         assert r.status_code == 201, r.text
         body = r.json()
         assert body["status"] == "done"
-        assert body["trail"]
+        # Mesmo contrato exato da outra via de upload: REAJ-01 em cada clausula,
+        # trilha completa em ordem (a base normativa vazia nao muda os passos).
+        assert [(a["risk_id"], a["severity"], a["clause_index"]) for a in body["report"]["content"]["alerts"]] == [
+            ("REAJ-01", "red", 1),
+            ("REAJ-01", "red", 2),
+        ]
+        assert [(s["step"], s["clause_n"]) for s in body["trail"]] == [
+            ("iniciar", None),
+            ("classificar", None),
+            ("ficha", None),
+            ("triar", 1),
+            ("triar", 2),
+            ("buscar", 1),
+            ("buscar", 2),
+            ("analisar", None),
+            ("validar", None),
+        ]
         assert body["filename_alias"].startswith("documento-") and body["filename_alias"].endswith(".docx")
         assert "Vanderlei" not in r.text
 
