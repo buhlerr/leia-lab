@@ -220,3 +220,58 @@ def test_trace_usage_counts_root_runs_of_the_month(n, status):
     call = fake.calls[0]
     assert call["is_root"] is True and call["project_name"] == "leia-lab"  # 1 traco = 1 raiz = 1 analise
     assert call["start_time"] == dt.datetime(2026, 11, 1, tzinfo=dt.UTC)
+
+
+# ---------------------------------------------------------------- rastreio que falha nunca derruba
+
+
+class _MlflowDown(Exception):
+    pass
+
+
+def _raise_mlflow_down(calls: list[str], name: str):
+    def boom(*args, **kwargs):
+        calls.append(name)
+        raise _MlflowDown(name)
+
+    return boom
+
+
+async def test_analysis_finishes_and_tracing_turns_off_when_mlflow_raises_mid_run(seeded, settings, capture, monkeypatch):
+    import mlflow
+
+    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+    calls: list[str] = []
+    graph = build_analyze_minuta_graph(pool=seeded, settings=settings)
+    with tracing_session(mlflow_uri=capture.mlflow_uri, mlflow_experiment="leia-lab-teste"):
+        monkeypatch.setattr(mlflow, "start_span", _raise_mlflow_down(calls, "start_span"))
+        monkeypatch.setattr(mlflow, "update_current_trace", _raise_mlflow_down(calls, "update_current_trace"))
+        out = await analyze(graph, raw_text=RAW, filename=FILE_NAME)
+
+    assert await seeded.fetchval("SELECT status FROM analyses WHERE id = $1::uuid", out["analysis_id"]) == "done"
+    assert len(calls) == 1, f"depois da primeira falha o rastreio fica desligado; chamadas: {calls}"
+
+
+async def test_analysis_runs_untraced_when_mlflow_setup_raises_and_process_state_is_restored(
+    seeded, settings, capture, monkeypatch
+):
+    import mlflow
+    from mlflow.tracing.provider import is_tracing_enabled
+
+    monkeypatch.delenv("LANGSMITH_API_KEY", raising=False)
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    prev_uri = mlflow.get_tracking_uri()
+    mlflow.tracing.disable()
+    calls: list[str] = []
+    monkeypatch.setattr(mlflow, "set_experiment", _raise_mlflow_down(calls, "set_experiment"))
+    graph = build_analyze_minuta_graph(pool=seeded, settings=settings)
+    try:
+        with tracing_session(mlflow_uri=capture.mlflow_uri, mlflow_experiment="leia-lab-teste"):
+            out = await analyze(graph, raw_text=RAW, filename=FILE_NAME)
+        assert calls == ["set_experiment"]
+        assert await seeded.fetchval("SELECT status FROM analyses WHERE id = $1::uuid", out["analysis_id"]) == "done"
+        assert not is_tracing_enabled(), "o enable do MLflow precisa ser desfeito"
+        assert mlflow.get_tracking_uri() == prev_uri
+        assert "MLFLOW_TRACKING_URI" not in os.environ
+    finally:
+        mlflow.tracing.reset()
