@@ -75,6 +75,7 @@ async def chat_completion(
     }
     if json_output:
         payload["response_format"] = {"type": "json_object"}
+        payload["provider"]["require_parameters"] = True
     headers = {"Authorization": f"Bearer {settings.OPENROUTER_API_KEY}"}
     async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.post(url, json=payload, headers=headers)

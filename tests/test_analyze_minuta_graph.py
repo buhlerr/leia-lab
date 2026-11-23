@@ -1,3 +1,5 @@
+import asyncio
+
 from src.db.connection import init_db
 from src.db.seed import seed_defaults
 from src.graphs.analyze_minuta_graph import analyze, build_analyze_minuta_graph
@@ -213,8 +215,8 @@ async def test_cost_budget_caps_redaction_and_reports_it(pool, settings, monkeyp
     monkeypatch.setattr(mod, "_CONCURRENCY", 1)  # serializa: a ordem da fila decide quem e redigido
 
     async def fake_chat(system_prompt, user_prompt, s=None, *, temperature=0.1, max_tokens=None, json_output=False):
-        assert json_output is True  # o redator pede JSON
-        return ChatResult('{"alertas": []}', 30, 0.02)
+        await asyncio.sleep(0)  # cede o loop como o HTTP real: pega checagem de teto feita fora do semaforo
+        return ChatResult('{"alertas": []}', 30, 0.02 if json_output else 99.0)
 
     monkeypatch.setattr(mod, "chat_completion", fake_chat)
     clausulas = "\n".join(

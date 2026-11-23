@@ -93,6 +93,7 @@ async def test_chat_completion_sends_limits_and_data_policy_and_parses_cost():
     await chat_completion("sys", "user", online_settings, json_output=True)
     payload = json.loads(route.calls.last.request.content)
     assert payload["response_format"] == {"type": "json_object"}
+    assert payload["provider"]["require_parameters"] is True  # so provedores que aceitam JSON mode
 
 
 async def test_chat_completion_offline_alertas_parses_risks_and_clause():

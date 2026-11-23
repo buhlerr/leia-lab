@@ -1,3 +1,4 @@
+import json
 import logging
 
 import pytest
@@ -40,11 +41,12 @@ async def test_embed_text_reports_effective_model_offline():
 
 @respx.mock
 async def test_embed_text_reports_configured_model_online():
-    respx.post("https://openrouter.ai/api/v1/embeddings").mock(
+    route = respx.post("https://openrouter.ai/api/v1/embeddings").mock(
         return_value=Response(200, json={"data": [{"embedding": [0.1] * EMBEDDING_DIM}]})
     )
     result = await embed_text("clausula", ONLINE)
     assert result.model == ONLINE.EMBEDDING_MODEL
+    assert json.loads(route.calls.last.request.content)["provider"] == {"data_collection": "deny"}
 
 
 async def test_offline_fallback_warns_once_per_process(caplog):
