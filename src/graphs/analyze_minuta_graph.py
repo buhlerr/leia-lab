@@ -57,7 +57,7 @@ from src.tracing import tag_analysis
 
 _EMPTY_TEXT_MSG = "text must be a non-empty string"
 _NO_ANALYSIS_ID_MSG = "graph input needs an 'analysis_id'; use analyze(), which owns the analyses row"
-_CONCURRENCY = 8  # teto global de chamadas externas (Jev, LLM, embeddings) por loop
+_CONCURRENCY = 8  # teto PADRAO de chamadas externas (Jev, LLM, embeddings); o knob publico e max_concurrency
 _EXCERPT = 200  # caracteres do texto MASCARADO da clausula guardados na trilha
 
 
@@ -255,6 +255,7 @@ def build_analyze_minuta_graph(
     confirm_cutoff: float = 0.5,
     norm_cutoff: float = 0.3,
     max_clauses: int = 45,
+    max_concurrency: int = _CONCURRENCY,
     checkpointer: Any = None,
 ) -> AnalyzeMinutaGraph:
     """Compila o grafo de analise de minuta (roteamento condicional pos-classificacao).
@@ -270,12 +271,15 @@ def build_analyze_minuta_graph(
         "max_clauses": max_clauses,
         "max_cost_usd": cfg.ANALYSIS_MAX_COST_USD,
     }
-    limiters: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore] = weakref.WeakKeyDictionary()
+    limiters: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[int, asyncio.Semaphore]] = (
+        weakref.WeakKeyDictionary()
+    )
 
     def _limiter() -> asyncio.Semaphore:
-        # Um semaforo por event loop (Semaphore nao atravessa loops), compartilhado por todo o grafo.
+        # Um semaforo por (event loop, teto): Semaphore nao atravessa loops, e cada grafo
+        # traz seu proprio teto publico (max_concurrency).
         loop = asyncio.get_running_loop()
-        return limiters.setdefault(loop, asyncio.Semaphore(_CONCURRENCY))
+        return limiters.setdefault(loop, {}).setdefault(max_concurrency, asyncio.Semaphore(max_concurrency))
 
     async def jev(state: dict[str, Any], questions: dict[str, Any]) -> dict[str, Any]:
         async with _limiter():

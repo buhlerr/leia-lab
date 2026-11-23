@@ -184,10 +184,11 @@ async def test_external_call_concurrency_is_capped_across_nested_fanouts(pool, s
         for i in range(1, 13)
     )
     await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
-    graph = mod.build_analyze_minuta_graph(pool, settings)
+    # Teto publico explicito: o teste afirma o knob do grafo, nao a constante privada padrao.
+    graph = mod.build_analyze_minuta_graph(pool, settings, max_concurrency=3)
     await analyze(graph, raw_text="CONTRATO DE LOCAÇÃO RESIDENCIAL\n" + clausulas, filename="m.txt")
 
-    assert 1 < peak <= 8  # teto publico: nunca mais de 8 chamadas externas simultaneas
+    assert 1 < peak <= 3  # nunca mais de 3 chamadas externas simultaneas: o pico medido obedece ao teto pedido
 
 
 async def test_tema_map_ids_resolve_to_citation_without_duplicates_or_empty_norms(pool, settings):
@@ -223,8 +224,6 @@ async def test_cost_budget_caps_redaction_and_reports_it(pool, settings, monkeyp
     import src.graphs.analyze_minuta_graph as mod
     from src.clients.llm import ChatResult
 
-    monkeypatch.setattr(mod, "_CONCURRENCY", 1)  # serializa: a ordem da fila decide quem e redigido
-
     async def fake_chat(system_prompt, user_prompt, s=None, *, temperature=0.1, max_tokens=None, json_output=False):
         await asyncio.sleep(0)  # cede o loop como o HTTP real: pega checagem de teto feita fora do semaforo
         return ChatResult('{"alertas": []}', 30, 0.02 if json_output else 99.0)
@@ -236,7 +235,10 @@ async def test_cost_budget_caps_redaction_and_reports_it(pool, settings, monkeyp
         for i in range(1, 9)
     )
     await use_rules(pool, _RISCOS, ["reajuste_e_indexacao"])
-    graph = mod.build_analyze_minuta_graph(pool, settings.model_copy(update={"ANALYSIS_MAX_COST_USD": 0.05}))
+    # max_concurrency=1 serializa pelo knob publico: a ordem da fila decide quem e redigido
+    graph = mod.build_analyze_minuta_graph(
+        pool, settings.model_copy(update={"ANALYSIS_MAX_COST_USD": 0.05}), max_concurrency=1
+    )
     out = await analyze(graph, raw_text="CONTRATO DE LOCAÇÃO RESIDENCIAL\n" + clausulas, filename="m.txt")
 
     assert sum(1 for cl in out["clausulas"] if "analise" in cl) == 3

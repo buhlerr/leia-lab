@@ -289,8 +289,9 @@ class AdminSmokeTests(SchemaMixin, TestCase):
             self.assertEqual(self.client.get(url).status_code, 200, url)  # ...e a pagina abre
 
     def test_admin_bloqueia_escrita_nos_auditaveis(self):
-        # Nem superuser escreve nas tabelas de auditoria pelo admin: add, POST de
-        # alteracao e POST de exclusao dao 403, e a linha continua onde esta.
+        # Nem superuser escreve nas tabelas de auditoria pelo admin: GET E POST do add,
+        # POST de alteracao, POST de exclusao e a exclusao em massa do changelist sao
+        # recusados, e nenhuma linha nasce, muda de lugar ou sai.
         MinutaType.objects.create(slug="t-audit", name="T", classifier_description="d")
         historico = DomainHistory.objects.filter(table_name="minuta_types").order_by("-id").first()
         analise = _analysis()
@@ -305,15 +306,24 @@ class AdminSmokeTests(SchemaMixin, TestCase):
             recorded_at=timezone.now(),
         )
         alvo = {DomainHistory: historico, Analysis: analise, AnalysisTrail: trilha}
+        # Cada tabela auditavel de hoje tem que ter cobertura aqui; uma quarta entra
+        # quebrando este teste ate ganhar linha, POSTs e contagem.
+        self.assertEqual(set(alvo), set(AUDIT_MODELS))
+        antes = {m: m.objects.count() for m in AUDIT_MODELS}
         self.client.force_login(self.admin)
         for model, linha in alvo.items():
             url_add = reverse(f"admin:domain_{model._meta.model_name}_add")
             self.assertEqual(self.client.get(url_add).status_code, 403, url_add)
+            self.assertEqual(self.client.post(url_add, {}).status_code, 403, url_add)  # criar por POST tambem
             url_change = reverse(f"admin:domain_{model._meta.model_name}_change", args=[linha.pk])
             self.assertEqual(self.client.post(url_change, {}).status_code, 403, url_change)
             url_delete = reverse(f"admin:domain_{model._meta.model_name}_delete", args=[linha.pk])
             self.assertEqual(self.client.post(url_delete, {"post": "yes"}).status_code, 403, url_delete)
-            self.assertTrue(model.objects.filter(pk=linha.pk).exists())
+            url_list = reverse(f"admin:domain_{model._meta.model_name}_changelist")
+            self.client.post(url_list, {"action": "delete_selected", "_selected_action": [linha.pk]})
+            self.assertTrue(model.objects.filter(pk=linha.pk).exists(), model.__name__)
+        for model in AUDIT_MODELS:
+            self.assertEqual(model.objects.count(), antes[model], model.__name__)
 
 
 # ---------------------------------------------------------------- nova analise (pela API)

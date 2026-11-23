@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import subprocess
 from pathlib import Path
@@ -17,6 +18,16 @@ from src.ingest.extract import (
 )
 from src.ingest.isolated import extract_text_isolated
 from tests.test_extract import _docx_with_table, _pdf_with_text
+
+# Dado pessoal de mentira no nome do arquivo e no corpo: a extracao devolve texto MASCARADO
+# e um apelido que nao carrega nada disso.
+NAME = "Carlos Eduardo Mendes"
+CPF = "999.888.777-66"
+
+
+def _alias(path: Path) -> str:
+    """O apelido exato que resolve_doc_alias deve devolver para ``path``: documento-<sha8>.<ext>."""
+    return f"documento-{hashlib.sha256(path.name.encode('utf-8')).hexdigest()[:8]}{path.suffix}"
 
 
 def _docx_with_text(text: str) -> bytes:
@@ -65,7 +76,7 @@ def test_extract_isolated_rejects_a_failed_process(monkeypatch: pytest.MonkeyPat
 
 
 async def test_prepare_ingest_input_extracts_docx_with_table(tmp_path: Path):
-    path = tmp_path / "minuta.docx"
+    path = tmp_path / f"minuta_{NAME}_{CPF}.docx"
     path.write_bytes(_docx_with_table())
 
     state = await prepare_ingest_input(file_path=path)
@@ -76,26 +87,28 @@ async def test_prepare_ingest_input_extracts_docx_with_table(tmp_path: Path):
         "A2 | B2",
         "Ultimo paragrafo",
     ]
-    # O nome real do arquivo nao entra no estado: vira o apelido publico.
-    assert state["resolved_filename"].startswith("documento-")
-    assert state["resolved_filename"].endswith(".docx")
+    # O nome real do arquivo (com PII) nao entra no estado: vira o apelido publico exato.
+    assert state["resolved_filename"] == _alias(path)
 
 
-async def test_prepare_ingest_input_extracts_pdf(tmp_path: Path):
-    path = tmp_path / "minuta.pdf"
-    path.write_bytes(_pdf_with_text("Contrato de teste"))
-
-    state = await prepare_ingest_input(file_path=path)
-
-    assert "Contrato de teste" in state["masked_text"]
-    assert state["resolved_filename"].endswith(".pdf")
-
-
-async def test_prepare_ingest_input_reads_txt(tmp_path: Path):
-    path = tmp_path / "minuta.txt"
-    path.write_text("Clausula em texto puro\n", encoding="utf-8")
+async def test_prepare_ingest_input_extracts_pdf_and_masks(tmp_path: Path):
+    path = tmp_path / f"minuta_{NAME}_{CPF}.pdf"
+    path.write_bytes(_pdf_with_text(f"LOCADOR: {NAME}, brasileiro, CPF {CPF}."))
 
     state = await prepare_ingest_input(file_path=path)
 
-    assert state["masked_text"] == "Clausula em texto puro\n"
-    assert state["resolved_filename"].endswith(".txt")
+    # A extracao devolve o texto MASCARADO: nada do dado pessoal cru atravessa.
+    assert CPF not in state["masked_text"]
+    assert "[CPF]" in state["masked_text"]
+    assert state["resolved_filename"] == _alias(path)
+
+
+async def test_prepare_ingest_input_reads_txt_and_masks(tmp_path: Path):
+    path = tmp_path / f"minuta_{NAME}_{CPF}.txt"
+    path.write_text(f"LOCADOR: {NAME}, CPF {CPF}.\n", encoding="utf-8")
+
+    state = await prepare_ingest_input(file_path=path)
+
+    assert CPF not in state["masked_text"]
+    assert "[CPF]" in state["masked_text"]
+    assert state["resolved_filename"] == _alias(path)
