@@ -4,6 +4,35 @@ Como o que está em produção no homelab é protegido, restaurado e vigiado. Ac
 Proxmox (`pve`, 192.168.0.9) com `pct exec 116`. **Não use SSH direto em 192.168.0.120**: outro
 aparelho na rede já respondeu por esse IP (conflito de ARP, ver bead `leia-lab-1g1.10`).
 
+## Instância temporária na VPS `acfs` (desde 2026-11-24)
+
+O homelab caiu em 2026-11-24 (`ssh pve` sem resposta pelo Tailscale). A Leia subiu **do zero** na VPS
+`acfs`, sem os dados do CT 116: não havia cópia dele fora do homelab (o bucket R2 `homelab-pbs` só tem
+os CT 100, 109, 111, 113 e a VM 200; bead `leia-lab-usd`).
+
+| Peça | Estado |
+|---|---|
+| Pasta | `/data/leia-prod` (fora do repo, `chmod 711`): `docker-compose.yml` (projeto `leia-prod`), `app-<sha>/` (o `git archive` do build) e os `.env` (`chmod 600`: `pg.env`, `roles.env`, `api.env`, `django.env`) |
+| Imagem | `leia-api:3f85ca0` (`origin/master`), a mesma para API e admin |
+| Postgres | container `leia-prod-postgres`, `127.0.0.1:5434`, volume `leia-prod_leia_prod_pgdata`. **Não** é o de testes da 5433 |
+| API | container `leia-api`, `127.0.0.1:18080` (a 8080 da VPS é de outro serviço) |
+| Admin | container `leia-admin`, `127.0.0.1:18000`; superusuário `admin`, senha em `django.env` |
+| Dados | `init --real` + `apply-matrix --versao v3`: sem as edições do admin nem o histórico do CT 116 |
+| Modelos | offline (chaves em branco no `api.env`); embeddings da base são `offline-hash-v1` e precisam de reindexação quando a chave real entrar |
+| Acesso público | nenhum: o túnel `homelab` aponta para `192.168.0.120`, e o conector (CT 103) caiu com o homelab |
+| Backup | **nenhum ainda** (bead `leia-lab-uwc`) |
+
+Os comandos rodam com `sudo docker` (o usuário `ubuntu` não está no grupo `docker`):
+
+```bash
+cd /data/leia-prod && sudo docker compose ps
+curl -sf http://127.0.0.1:18080/healthz
+ssh -L 18000:127.0.0.1:18000 acfs   # admin em http://localhost:18000/admin/ a partir do seu PC
+```
+
+Quando o homelab voltar, o CT 116 continua sendo a produção; o que entrou aqui (análises, edições do
+admin) não volta sozinho (bead `leia-lab-uwc`).
+
 ## Acesso público: Cloudflare Tunnel (migrado do Pangolin em 2026-11-23)
 
 Em 2026-11-23 a VPS Oracle do Pangolin (`137.131.254.251`) parou de responder em 80/443 (TCP aceita,
