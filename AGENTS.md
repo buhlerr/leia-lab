@@ -33,7 +33,7 @@ docker compose up -d postgres             # local Postgres 17 + pgvector on 5433
 
 `scripts/ci.sh` is the CI: DSR runs it (`required_checks: ["scripts/ci.sh"]` in its registry). A new kind of check goes in as a `step` there, never as a command only a doc mentions. Changing how an analysis starts, fails or finishes: run the `verify-analysis-lifecycle` skill (`.claude/skills/verify-analysis-lifecycle/`).
 
-The suite drops and recreates `public` in the test database; `tests/_db_guard.py` refuses any database not ending in `_test`. To prove a change end to end, use the `verify-leia-lab` skill (`.claude/skills/verify-leia-lab/`), not bare `python -m src.cli`: it pins a disposable `leia_lab_verify_<id>` database and blanks paid keys.
+The suite drops and recreates `public` in the test database; `tests/_db_guard.py` refuses any database not ending in `_test`. To prove a change end to end, use the `verify-leia-lab` skill (`.claude/skills/verify-leia-lab/`), not bare `python -m src.cli`: it pins a disposable `leia_lab_verify_<id>` database and blanks paid keys. With blank keys every model call is a fixed stand-in answer, so such a run proves the plumbing, never model quality: `docs/MODO-OFFLINE.md`.
 
 Secrets come from 1Password (`op run --env-file=.env.op -- <cmd>`, in Git Bash on Windows). Never write secret values to disk. Paid paths (real OpenRouter/TypeSafe keys, `--trace`) spend money; ask first.
 
