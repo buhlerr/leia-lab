@@ -14,7 +14,8 @@ apagar nada.
 
 Antes do diagnóstico, a Leia subiu **do zero** na VPS `acfs` como reserva, sem os dados do CT 116: não
 havia cópia dele fora do homelab (o bucket R2 `homelab-pbs` só tem os CT 100, 109, 111, 113 e a VM
-200; bead `leia-lab-usd`). A produção continua no CT 116; nada público aponta para a VPS.
+200; bead `leia-lab-usd`). A produção continua no CT 116; nada público aponta para a VPS. Parada
+em 2026-11-24 com `docker compose stop` (volume e arquivos mantidos); `sudo docker compose start` religa.
 
 | Peça | Estado |
 |---|---|
