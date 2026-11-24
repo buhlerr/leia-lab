@@ -3,6 +3,8 @@
 Uso, da raiz do repo:  op run --env-file=.env.op -- scripts/linear-sync.sh [--dry-run]
 
 1. Puxa do Linear so se alguma issue do time mudou desde a ultima rodada.
+   Depois tira da descricao de cada bead as secoes que o bd anexa ao enviar
+   (## Acceptance Criteria, ## Design, ## Notes), que a puxada traz de volta.
 2. Envia so os beads novos ou que mudaram (hash de titulo, descricao, status, prioridade,
    rotulos e pai): os abertos, e os fechados que ja estao no Linear (para irem a Done la).
    As 62 tarefas fechadas antes do espelho nunca vao.
@@ -32,6 +34,11 @@ API = "https://api.linear.app/graphql"
 USER_AGENT = "leia-lab-linear-sync (+https://github.com/buhlerr/leia-lab)"
 _IDENT = re.compile(r"linear\.app/[^/]+/issue/([A-Z]+-\d+)")
 _PUSHED_FIELDS = ("title", "description", "acceptance_criteria", "status", "priority", "issue_type", "labels", "parent")
+_BD_SECTION = re.compile(r"\n+## (Acceptance Criteria|Design|Notes)\n+")
+_BD_SECTION_FIELD = {"Acceptance Criteria": "acceptance_criteria", "Design": "design", "Notes": "notes"}
+_AUTOLINK = re.compile(r"<(https?://[^>\s]+)>")
+_LINKIFIED = re.compile(r"\[([^\]]+)\]\(<?(?:https?://)?\1/?>?\)")
+_MD_ESCAPE = re.compile(r"\\([\\`*_{}\[\]()#+\-.!<>~|])")
 BD = shutil.which("bd-go") or shutil.which("bd") or "bd"
 
 
@@ -61,6 +68,37 @@ def fingerprint(b: dict) -> str:
     data = {k: b.get(k) for k in _PUSHED_FIELDS}
     data["labels"] = sorted(data["labels"] or [])
     return hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def _flat(text: str) -> str:
+    return " ".join(_AUTOLINK.sub(r"\1", _LINKIFIED.sub(r"\1", _MD_ESCAPE.sub(r"\1", text))).split())
+
+
+def own_description(b: dict) -> str:
+    """O bd envia ao Linear a descricao seguida de ## Acceptance Criteria, ## Design e ## Notes, e a puxada
+    devolve tudo isso a descricao; cada ida e volta somava uma copia. Tira do fim as secoes iguais ao campo
+    do bead (o Linear muda espacos e poe links entre < >). Uma secao editada no Linear fica."""
+    description = b.get("description") or ""
+    while heads := list(_BD_SECTION.finditer(description)):
+        last = heads[-1]
+        field = b.get(_BD_SECTION_FIELD[last.group(1)]) or ""
+        if not field or _flat(description[last.end():]) != _flat(field):
+            break
+        description = description[: last.start()]
+    return description
+
+
+def strip_bd_sections(all_beads: list[dict], dry_run: bool) -> list[str]:
+    cleaned = []
+    for b in all_beads:
+        own = own_description(b)
+        if own == (b.get("description") or ""):
+            continue
+        if not dry_run:
+            subprocess.run([BD, "update", b["id"], "--body-file", "-"], input=own, text=True, check=True, capture_output=True)
+        b["description"] = own
+        cleaned.append(b["id"])
+    return cleaned
 
 
 def linear_changed_since(since: str | None) -> bool:
@@ -134,6 +172,8 @@ def main() -> None:
         print("Linear sem mudancas desde a ultima rodada")
 
     current = beads()
+    if cleaned := strip_bd_sections(current, dry_run):
+        print(f"{'Limparia' if dry_run else 'Limpou'} secoes do bd repetidas na descricao de {len(cleaned)} bead(s): {', '.join(cleaned)}")
     pending = to_push(current, state["hashes"])
     if pending:
         print(f"Enviando {len(pending)} bead(s): {', '.join(pending)}")
