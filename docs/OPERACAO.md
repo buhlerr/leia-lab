@@ -116,6 +116,11 @@ op run --env-file=.env.op -- scripts/linear-sync.sh             # sincronizar
 O script (`scripts/linear_sync.py`) só age quando algo mudou:
 
 1. Pergunta ao Linear se alguma issue do time mudou desde a última rodada; só então puxa.
+   Em seguida tira do fim da descrição de cada bead as seções que o `bd` anexa ao enviar
+   (`## Acceptance Criteria`, `## Design`, `## Notes`): a puxada as devolve à descrição, e sem essa
+   limpeza cada ida e volta somava uma cópia. Só sai a seção cujo texto é igual ao campo do bead,
+   ignorando a formatação que o Linear muda; uma seção editada no Linear fica. Critério de aceite,
+   design e notas se editam no Beads.
 2. Envia só os beads novos ou alterados (hash de título, descrição, status, prioridade, rótulos e pai):
    os abertos e os fechados que já estão no Linear (para irem a Done lá).
 3. Põe no projeto **`leia-lab`** do Linear toda issue deste repo que esteja sem projeto, e tira o

@@ -31,6 +31,22 @@ def test_interleaved_criteria_design_and_notes_copies_are_removed():
     assert linear_sync.own_description(_bead(pulled, "feito", notes="nota", design="um desenho")) == BODY
 
 
+def test_name_linear_turned_into_a_link_still_matches():
+    pulled = BODY + "\n\n## Notes\n\nrodar [ci.sh](<http://ci.sh>) antes do PR"
+    assert linear_sync.own_description(_bead(pulled, notes="rodar ci.sh antes do PR")) == BODY
+
+
+def test_bare_url_linear_turned_into_a_link_still_matches():
+    url = "https://github.com/buhlerr/leia-lab/pull/41#issuecomment-1"
+    pulled = BODY + f"\n\n## Notes\n\npostados em [{url}](<{url}>) : teto"
+    assert linear_sync.own_description(_bead(pulled, notes=f"postados em {url} : teto")) == BODY
+
+
+def test_markdown_escape_added_by_linear_still_matches():
+    pulled = BODY + "\n\n## Notes\n\nregex so submodule.\\*.path"
+    assert linear_sync.own_description(_bead(pulled, notes="regex so submodule.*.path")) == BODY
+
+
 def test_section_edited_in_linear_is_kept():
     pulled = BODY + "\n\n## Acceptance Criteria\n\ncriterio reescrito no Linear"
     assert linear_sync.own_description(_bead(pulled, AC)) == pulled
