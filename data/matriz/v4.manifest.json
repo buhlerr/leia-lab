@@ -1,0 +1,18 @@
+{
+  "versao": "v4",
+  "arquivo": "v4.jsonl",
+  "sha256": "00b5fd8fa15eaa8a2ba784aa7dd416e72768c941996032819fa719cacb31cb0c",
+  "linhas": 189,
+  "origem": {
+    "base": "matriz/v3",
+    "rodada": "lacunas da v3 em 7 modelos publicos de contrato de locacao residencial (CRECI-MS, CRECI-PA, CRECI-PB, AGEHAB-GO, DPU, DNIT, Prefeitura de Mogeiro), 2026-11-25, bead leia-lab-iod",
+    "mudancas": [
+      "R186: novo, restricao de conduta licita do locatario na unidade (animais, visitas, fumar)",
+      "R187: novo, renuncia antecipada do fiador a exoneracao",
+      "R188: novo, multa moratoria diaria ou sem teto",
+      "R189: novo, seguros alem do incendio a cargo do locatario",
+      "R190: novo, forma especial e onerosa para aceitar a preferencia"
+    ]
+  },
+  "aviso": "Dados de apoio a analise juridica. A v4 acrescenta cinco riscos achados em modelos publicos; textos e criticidades NAO foram validados por advogado. Revisao humana obrigatoria."
+}

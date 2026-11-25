@@ -99,6 +99,19 @@ def test_matrix_v3_promotes_r007():
     assert len(sha) == 64
 
 
+def test_matrix_v4_adds_r186_to_r190_on_top_of_v3():
+    v3 = (DATA_DIR / "matriz" / "v3.jsonl").read_bytes()
+    v4 = (DATA_DIR / "matriz" / "v4.jsonl").read_bytes()
+    assert v4.startswith(v3)
+    rows, sha = read_matrix("v4")
+    assert len(rows) == 189 and len({t for t, _ in rows}) == 31
+    by_id = {x["id"]: (t, x) for t, x in rows}
+    assert by_id["R186"][0] == "objeto_e_destinacao"
+    assert by_id["R188"][1]["cor"] == "vermelho"
+    assert all(by_id[f"R{n}"][1]["normas"] for n in range(186, 191))
+    assert len(sha) == 64
+
+
 def test_base_v1_reads_every_article_with_unique_citation():
     artigos, _ = read_base("v1")
     assert len(artigos) == 330
@@ -180,6 +193,20 @@ async def test_apply_matrix_v3_promotes_r007(pool):
     assert by_id["R007"] == "vermelho" and by_id["R054"] == "vermelho"
     assert "R176" not in by_id
     assert await apply_matrix(pool, "v3") is False
+
+
+async def test_apply_matrix_v4_activates_the_new_risks(pool):
+    await init_db(pool)
+    await seed_defaults(pool)
+    assert await apply_matrix(pool, "v3") is True
+    assert await apply_matrix(pool, "v4") is True
+
+    active = await pool.fetch("SELECT risk_id, criticality FROM risk_matrix WHERE active")
+    assert len(active) == 189
+    by_id = {r["risk_id"]: r["criticality"] for r in active}
+    assert {f"R{n}" for n in range(186, 191)} <= set(by_id)
+    assert by_id["R188"] == "vermelho" and by_id["R007"] == "vermelho"
+    assert await apply_matrix(pool, "v4") is False
 
 
 async def test_apply_matrix_refuses_a_changed_published_version(pool, tmp_path):
