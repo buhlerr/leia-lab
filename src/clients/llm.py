@@ -75,12 +75,19 @@ async def chat_completion(
         "provider": {"data_collection": settings.OPENROUTER_DATA_COLLECTION},
         "usage": {"include": True},
     }
+    if settings.CHAT_REASONING == "off":
+        payload["reasoning"] = {"enabled": False}
+    elif settings.CHAT_REASONING != "default":
+        payload["reasoning"] = {"effort": settings.CHAT_REASONING}
     if json_output:
         payload["response_format"] = {"type": "json_object"}
         payload["provider"]["require_parameters"] = True
     headers = {"Authorization": f"Bearer {settings.OPENROUTER_API_KEY}"}
     async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.post(url, json=payload, headers=headers)
+        if resp.status_code == 404 and "reasoning" in payload:
+            fallback = {k: v for k, v in payload.items() if k != "reasoning"}
+            resp = await client.post(url, json=fallback, headers=headers)
     resp.raise_for_status()
     data = resp.json()
     content = data["choices"][0]["message"]["content"] or ""

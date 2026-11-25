@@ -14,17 +14,17 @@
   },
   "clauses": [
     {
-      "id": "g01", "file": "locacao-01.txt", "clause_n": 6,
-      "clause_sha256": "0db26a1893befdacb94eb5b5fd3c0d3ae5a407d666484b397383bf84364c4935",
+      "id": "g01", "file": "locacao-01.txt", "clause_n": 4,
+      "clause_sha256": "7bc7492c80df87f12b64e512db27a003997d424e40dc5e512e817c0c893800ba",
       "expected": ["R029", "R031"], "expected_severity": {"R029": "yellow", "R031": "yellow"}
     },
     {
-      "id": "g02", "file": "locacao-01.txt", "clause_n": 11,
-      "clause_sha256": "0b958083ea72625e8999cc4deff6b3d0d9837333aa4bbdea4e7060160469abb3",
+      "id": "g02", "file": "locacao-01.txt", "clause_n": 9,
+      "clause_sha256": "12266983c0ba7eb7696ba8ac35ea8e89756e5b1cb4d45d99bc34c50e5f2db61d",
       "expected": ["R073", "R076"], "expected_severity": {"R073": "red", "R076": "red"}
     },
     {
-      "id": "g03", "file": "locacao-01.txt", "clause_n": 17,
+      "id": "g03", "file": "locacao-01.txt", "clause_n": 13,
       "clause_sha256": "189fe1ade320f9cdd8baf066bb6e6b1ac7e0476bb8cf271ae760459984c28ace",
       "expected": ["R101", "R102"], "expected_severity": {"R101": "yellow", "R102": "yellow"}
     },
@@ -60,7 +60,7 @@
     },
     {
       "id": "g10", "file": "locacao-06.txt", "clause_n": 14,
-      "clause_sha256": "efa0cf62d6654a83edd88af95d45b18b76fc252589bc38b059c60657ed1a592d",
+      "clause_sha256": "0b1bee2abdaad56a57b2c3a0faf407eb40516404c9142198514f6f87d708a168",
       "expected": ["R073", "R076", "R077", "R138"], "expected_severity": {"R073": "red", "R076": "red", "R077": "yellow", "R138": "yellow"}
     },
     {

@@ -28,6 +28,21 @@ def test_segment_clauses_splits_by_clausula_and_merges_short_headers():
     assert "Cláusula 2ª" in clauses[1]
 
 
+def test_segment_clauses_does_not_split_inline_clause_references():
+    text = (
+        "CLÁUSULA 8ª – DAS GARANTIAS\n"
+        "Em garantia das obrigações deste contrato, a LOCATÁRIA oferece, cumulativamente, a\n"
+        "fiança prestada na Cláusula 9ª e caução em dinheiro no valor de R$ 9.400,00.\n"
+        "CLÁUSULA 9ª – DA FIANÇA\n"
+        "O FIADOR assume a condição de principal pagador e responsável solidário por todas as obrigações da LOCATÁRIA.\n"
+    )
+    clauses = segment_clauses(text)
+    assert len(clauses) == 2
+    assert clauses[0].startswith("CLÁUSULA 8ª")
+    assert "Cláusula 9ª e caução em dinheiro" in clauses[0]
+    assert clauses[1].startswith("CLÁUSULA 9ª")
+
+
 def test_validate_and_format_replaces_non_literal_excerpt_and_downgrades_red_without_norm():
     cl_text = "Cláusula 4ª - O reajuste do aluguel ocorrerá a cada 6 meses pelo IGP-M."
     doc_state = {

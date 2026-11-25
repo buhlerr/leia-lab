@@ -94,12 +94,40 @@ async def test_chat_completion_sends_limits_and_data_policy_and_parses_cost():
     assert payload["provider"] == {"data_collection": "deny"}
     assert payload["usage"] == {"include": True}
     assert payload["max_tokens"] == 1500  # default: CHAT_MAX_TOKENS, sem max_tokens explicito
+    assert payload["reasoning"] == {"enabled": False}
     assert "response_format" not in payload
 
     await chat_completion("sys", mask_personal_data("user"), online_settings, json_output=True)
     payload = json.loads(route.calls.last.request.content)
     assert payload["response_format"] == {"type": "json_object"}
     assert payload["provider"]["require_parameters"] is True  # so provedores que aceitam JSON mode
+    assert payload["reasoning"] == {"enabled": False}
+
+
+@respx.mock
+async def test_chat_completion_retries_without_reasoning_when_model_rejects_parameter():
+    settings = Settings(
+        OPENROUTER_API_KEY="or-key",
+        OPENROUTER_BASE_URL="https://openrouter.ai/api/v1",
+        CHAT_MODEL="openai/gpt-4o-mini",
+    )
+    route = respx.post("https://openrouter.ai/api/v1/chat/completions").mock(
+        side_effect=[
+            httpx.Response(404, json={"error": {"message": "No endpoints found that can handle the requested parameters."}}),
+            httpx.Response(
+                200,
+                json={
+                    "choices": [{"message": {"content": '{"alertas": []}'}}],
+                    "usage": {"total_tokens": 30, "cost": 0.001},
+                },
+            ),
+        ]
+    )
+    res = await chat_completion("sys", mask_personal_data("user"), settings, json_output=True)
+    assert res.text == '{"alertas": []}'
+    assert len(route.calls) == 2
+    assert "reasoning" in json.loads(route.calls[0].request.content)
+    assert "reasoning" not in json.loads(route.calls[1].request.content)
 
 
 async def test_chat_completion_offline_alertas_parses_risks_and_clause():

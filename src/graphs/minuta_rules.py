@@ -49,15 +49,24 @@ _HEADER_RE = re.compile(
     r"(?i)(?=\b(?:cl[áa]usula\s+(?:\d+|[a-zà-ÿ]+)[ªºa°]?(?:\s+[a-zà-ÿ]+)?\s*(?:[-–—:.]|\s))"
     r"|(?<![\d.,])\b\d{1,2}\.\d{1,2}(?:\.\d{1,2})?\.?\s+(?=[A-ZÀ-Ý]))"
 )
+_LINE_HEADER_RE = re.compile(
+    r"(?im)(?=(?:^|\n)[ \t]*(?:cl[áa]usula\s+(?:\d+|[a-zà-ÿ]+)[ªºa°]?(?:\s+[a-zà-ÿ]+)?\s*(?:[-–—:.]|\s|$)"
+    r"|\d{1,2}\.\d{1,2}(?:\.\d{1,2})?\.?\s+(?=[A-ZÀ-Ý])))"
+)
 _MIN_CLAUSE = 120
 _MAX_CLAUSE = 1800
 
 
 def segment_clauses(text: str) -> list[str]:
-    t = re.sub(r"\s+", " ", text or "").strip()
+    raw = (text or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if "\n" in raw:
+        parts = [re.sub(r"\s+", " ", x).strip() for x in _LINE_HEADER_RE.split(raw) if x and x.strip()]
+    else:
+        t = re.sub(r"\s+", " ", raw).strip()
+        parts = [x.strip() for x in _HEADER_RE.split(t) if x and x.strip()]
     merged: list[str] = []
     buf = ""
-    for part in [x.strip() for x in _HEADER_RE.split(t) if x and x.strip()]:
+    for part in parts:
         buf = (buf + " " + part).strip()
         if len(buf) >= _MIN_CLAUSE:
             merged.append(buf)
