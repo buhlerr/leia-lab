@@ -9,6 +9,7 @@ Decisão da M5 (Q5, 2026-11-16): a matriz de riscos real e a base normativa fica
 | `matriz/v1.jsonl` | 185 riscos, 31 temas, 503 normas | `buhlerr/leia-kb-legislacao@242d540`, `levantamento/matriz-riscos.jsonl` |
 | `matriz/v2.jsonl` | 184 riscos, 31 temas, 500 normas | `matriz/v1.jsonl` + `gold/reviews/2026-11-16-locacao-02.json`: `R054` virou vermelho e `R176` saiu |
 | `matriz/v3.jsonl` | 184 riscos, 31 temas, 500 normas | `matriz/v2.jsonl` + confirmação na locacao-01: `R007` virou vermelho |
+| `matriz/v4.jsonl` | 189 riscos, 31 temas, 520 normas | `matriz/v3.jsonl` + lacunas achadas em 7 modelos públicos de contrato: `R186` a `R190` |
 | `base-normativa/v1/` | 330 artigos (leis, súmulas e teses) | `buhlerr/leia-kb-legislacao@08ab98d`, `saida/` |
 
 ## Como funciona
